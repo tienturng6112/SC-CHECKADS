@@ -1,19 +1,47 @@
 import { getGwenConfig } from '../config/gwenConfig';
+import { calculateStandardScore } from './scoreCalculator';
 
-// Hàm kiểm tra kết nối nhanh từ trang Bộ tiêu chí
+/**
+ * Kiểm tra kết nối tới Model AI thông qua cổng máy chủ Vite để tránh lỗi CORS
+ */
 export async function testGwenConnection(customConfig) {
   const cfg = customConfig || getGwenConfig();
   if (!cfg.baseUrl || !cfg.apiKey || !cfg.model) {
     return { ok: false, message: 'Vui lòng nhập đầy đủ Base URL, API Key và Model!' };
   }
 
+  // 1. Thử qua backend endpoint của Vite server (tránh bị chặn CORS trên trình duyệt)
+  try {
+    const proxyRes = await fetch('/api/test-gwen-connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg),
+    });
+
+    const data = await proxyRes.json();
+    if (proxyRes.ok && data.success) {
+      return {
+        ok: true,
+        message: data.message || `Kết nối thành công tới model "${cfg.model}" qua cổng máy chủ!`,
+      };
+    } else if (proxyRes.status !== 404) {
+      return {
+        ok: false,
+        message: data.error || `Lỗi kết nối từ máy chủ (HTTP ${proxyRes.status})`,
+      };
+    }
+  } catch (err) {
+    console.warn('Không gọi được /api/test-gwen-connection, thử kết nối trực tiếp:', err);
+  }
+
+  // 2. Thử fetch trực tiếp từ trình duyệt
   try {
     const endpoint = `${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`;
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${cfg.apiKey}`,
+        Authorization: `Bearer ${cfg.apiKey.trim()}`,
       },
       body: JSON.stringify({
         model: cfg.model,
@@ -37,23 +65,6 @@ export async function testGwenConnection(customConfig) {
       message: `Kết nối thành công tới model "${cfg.model}"! Phản hồi: ${reply}`,
     };
   } catch (error) {
-    // Thử qua proxy backend dev server để vượt qua lỗi chặn CORS trên trình duyệt
-    try {
-      const proxyRes = await fetch('/api/test-gwen-connection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cfg),
-      });
-      if (proxyRes.ok) {
-        return {
-          ok: true,
-          message: `Kết nối thành công tới model "${cfg.model}" qua cổng máy chủ!`,
-        };
-      }
-    } catch {
-      /* ignore */
-    }
-
     return {
       ok: false,
       message: `Không thể kết nối tới máy chủ (${error.message}). Kiểm tra lại Base URL hoặc CORS.`,
@@ -61,357 +72,338 @@ export async function testGwenConnection(customConfig) {
   }
 }
 
-// Hàm chính: Chấm điểm Quảng cáo (Đọc ảnh/video frames + Caption + 18 tiêu chí kèm sub-title)
+/**
+ * Hàm chính: Chấm điểm Quảng cáo (Gửi tới backend proxy /api/evaluate-ad để thẩm định bằng AI Vision thực tế)
+ * TUYỆT ĐỐI KHÔNG Silent Fallback khi có lỗi. Nếu có lỗi, trả về error rõ ràng để người dùng xử lý.
+ */
 export async function evaluateAdWithCriteria({
   caption,
   adLink,
   frames,
+  images,
+  sampleFrames,
   hasVideo,
   channel,
   groupA,
   groupB,
+  isDemo = false,
+  isComparison = false,
+  mode = 'my-ad',
+  myAd = null,
+  competitors = [],
 }) {
   const gwenCfg = getGwenConfig();
 
-  // 1. Tạo danh sách tiêu chí kèm Sub-title (desc) chi tiết
-  const criteriaPromptA = (groupA || [])
-    .map((item, idx) => `${idx + 1}. Tên tiêu chí: "${item.title}"\n   Hướng dẫn chấm (sub-title): ${item.desc}`)
-    .join('\n\n');
-
-  const criteriaPromptB = (groupB || [])
-    .map((item, idx) => `${idx + 1}. Tên tiêu chí: "${item.title}"\n   Hướng dẫn chấm (sub-title): ${item.desc}`)
-    .join('\n\n');
-
-  const promptText = `Bạn là chuyên gia kiểm duyệt chính sách quảng cáo thẩm mỹ/làm đẹp tại Việt Nam (Luật Quảng cáo, NĐ 342/2025, NĐ 96/2023) và chấm điểm hiệu quả nội dung.
-
-DỮ LIỆU QUẢNG CÁO CẦN CHẤM:
-- Kênh quảng cáo: ${channel?.label || 'Facebook'}
-- Caption quảng cáo: "${caption || '(Không có caption)'}"
-- Link quảng cáo: "${adLink || '(Không có)'}"
-- Hình ảnh đính kèm: ${frames?.length || 0} khung hình trích xuất từ video/ảnh quảng cáo.
-
-YÊU CẦU BẮT BUỘC:
-1. Hãy quan sát kỹ các khung hình đính kèm (mô tả đúng những gì diễn ra trong video/ảnh) kết hợp với Caption.
-2. Chấm điểm từng tiêu chí trên thang điểm nguyên từ 1 đến 5 dựa sát vào phần "Hướng dẫn chấm (sub-title)" của từng tiêu chí dưới đây.
-3. Giữ NGUYÊN VẸN tên tiêu chí ("title") trong mảng kết quả trả về:
-
-=== BẢNG ĐIỂM 1: NHÓM A — TUÂN THỦ CHÍNH SÁCH ===
-${criteriaPromptA}
-
-=== BẢNG ĐIỂM 2: NHÓM B — CHẤT LƯỢNG NỘI DUNG ===
-${criteriaPromptB}
-
-BẮT BUỘC TRẢ VỀ ĐÚNG ĐỊNH DẠNG JSON THUẦN TÚY (Không bọc ngoài bằng giải thích dài dòng):
-{
-  "totalScore": <số nguyên từ 0 đến 100>,
-  "statusLabel": "<Tốt | Khá | Cần cải thiện>",
-  "summary": "<Mô tả chi tiết nội dung video/hình ảnh đã tải lên và caption quảng cáo>",
-  "warnings": [
-    {
-      "level": "<Cao | Vừa | Thấp>",
-      "message": "<Nội dung cảnh báo vi phạm cụ thể>",
-      "legalBasisTitle": "<Tên tiêu chí bị vi phạm>",
-      "legalCode": "<Mã văn bản pháp lý, ví dụ: 16/2012/QH13 · 38/2021/NĐ-CP>"
-    }
-  ],
-  "groupAResults": [
-    { "title": "<Tên tiêu chí Nhóm A>", "score": <1-5>, "comment": "<Nhận xét cụ thể dựa trên hình ảnh video và caption>" }
-  ],
-  "groupBResults": [
-    { "title": "<Tên tiêu chí Nhóm B>", "score": <1-5>, "comment": "<Nhận xét cụ thể dựa trên hình ảnh video và caption>" }
-  ],
-  "pros": ["<Ưu điểm 1>", "<Ưu điểm 2>", "<Ưu điểm 3>"],
-  "cons": ["<Nhược điểm 1>", "<Nhược điểm 2>", "<Nhược điểm 3>"],
-  "customerPerspective": "<Đoạn văn góc nhìn khách hàng mục tiêu>",
-  "competitorAnalysis": {
-    "overview": "<Nhận xét vị thế quảng cáo so với mặt bằng ngành>",
-    "comparisons": ["<So sánh đối thủ 1>", "<So sánh đối thủ 2>"],
-    "improvements": ["<Hướng cải thiện 1>", "<Hướng cải thiện 2>", "<Hướng cải thiện 3>"]
-  },
-  "finalSummary": {
-    "text": "<Đoạn văn tổng kết & đề xuất cải thiện>",
-    "actionItems": ["<Việc cần làm 1>", "<Việc cần làm 2>", "<Việc cần làm 3>"],
-    "variants": [
-      { "tag": "Nhấn nỗi đau / insight", "content": "<Bài viết mẫu 1 đã sửa vi phạm>" },
-      { "tag": "Nhấn ưu đãi / CTA", "content": "<Bài viết mẫu 2 đã sửa vi phạm>" },
-      { "tag": "Nhấn cảm xúc / uy tín", "content": "<Bài viết mẫu 3 đã sửa vi phạm>" }
-    ]
+  // 1. Nếu người dùng CHỦ ĐỘNG chọn chế độ Demo / Thử nghiệm và là chế độ đơn
+  if (isDemo && !isComparison) {
+    console.log('[evaluateAdWithCriteria] Người dùng chọn Chế độ Demo (Giả lập)');
+    return generateCleanDemoEvaluation({ caption, adLink, channel, groupA, groupB });
   }
-}`;
 
-  // 2. Nếu đã có API Key của Gwen (OpenAI Compatible) -> Gọi trực tiếp tới Base URL
-  if (gwenCfg.apiKey && gwenCfg.baseUrl) {
-    try {
-      const endpoint = `${gwenCfg.baseUrl.replace(/\/+$/, '')}/chat/completions`;
+  // Kiểm tra API Key nếu không bật chế độ Demo
+  if (!isDemo && (!gwenCfg.apiKey || !gwenCfg.apiKey.trim())) {
+    return {
+      success: false,
+      error: 'Chưa cấu hình API Key. Vui lòng vào menu "Bộ tiêu chí" để nhập API Key cho AI (Qwen/Gwen hoặc OpenAI Compatible), hoặc bật "Chế độ Demo" để xem thử giao diện.',
+    };
+  }
 
-      // Đóng gói mảng content đa phương thức (Text + các khung hình Base64 từ video)
-      const userContent = [{ type: 'text', text: promptText }];
+  // 2. Gửi request thẩm định xuống backend proxy /api/evaluate-ad của Vite dev server
+  try {
+    let payload = {};
 
-      const validFrames = (frames || [])
+    if (isComparison) {
+      console.log(`[evaluateAdWithCriteria] Gửi yêu cầu so sánh đa video (${mode}): myAd + ${competitors.length} competitors`);
+      payload = {
+        config: gwenCfg,
+        isComparison: true,
+        mode,
+        channel: channel || { label: 'Facebook', dotColor: 'bg-blue-500' },
+        groupA: groupA || [],
+        groupB: groupB || [],
+        isDemo,
+        myAd: myAd
+          ? {
+              name: myAd.name || 'Ad của tôi',
+              caption: myAd.caption?.trim() || '',
+              adLink: myAd.adLink?.trim() || '',
+              frames: (myAd.frames || []).filter((f) => typeof f === 'string' && f.startsWith('data:image')).slice(0, 4),
+            }
+          : null,
+        competitors: (competitors || []).map((c, i) => ({
+          id: c.id || `comp_${i + 1}`,
+          name: c.title || c.name || `Ad đối thủ #${i + 1}`,
+          caption: c.caption?.trim() || '',
+          adLink: c.adLink?.trim() || '',
+          frames: (c.frames || []).filter((f) => typeof f === 'string' && f.startsWith('data:image')).slice(0, 4),
+        })),
+      };
+    } else {
+      const allFrames = frames || images || sampleFrames || [];
+      const validFrames = (allFrames || [])
         .filter((f) => typeof f === 'string' && f.startsWith('data:image'))
-        .slice(0, 4); // Gửi 4 khung hình đại diện để tốc độ phản hồi nhanh và tránh quá tải payload
+        .slice(0, 4);
 
-      validFrames.forEach((base64Img) => {
-        userContent.push({
-          type: 'image_url',
-          image_url: { url: base64Img },
-        });
-      });
+      console.log(`[evaluateAdWithCriteria] Gửi ${validFrames.length} khung hình base64 xuống backend /api/evaluate-ad`);
 
-      // Thử gọi kèm hình ảnh (Vision)
-      let response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${gwenCfg.apiKey}`,
+      payload = {
+        config: gwenCfg,
+        mode: mode || 'my-ad',
+        isComparison: false,
+        promptData: {
+          caption: caption?.trim() || '',
+          adLink: adLink?.trim() || '',
+          channel: channel?.label || 'Facebook',
+          frames: validFrames,
+          images: validFrames,
+          sampleFrames: validFrames,
+          groupA: groupA || [],
+          groupB: groupB || [],
         },
-        body: JSON.stringify({
-          model: gwenCfg.model,
-          messages: [
-            {
-              role: 'system',
-              content:
-                'Bạn là AI chuyên gia phân tích và chấm điểm quảng cáo. Luôn trả về duy nhất 1 object JSON hợp lệ.',
-            },
-            {
-              role: 'user',
-              content: userContent,
-            },
-          ],
-          temperature: 0.2,
-        }),
-      });
+      };
+    }
 
-      // Nếu model người dùng chọn không hỗ trợ mảng image_url, tự động gửi lại bằng Text thuần để không bị lỗi
-      if (!response.ok && validFrames.length > 0) {
-        response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${gwenCfg.apiKey}`,
-          },
-          body: JSON.stringify({
-            model: gwenCfg.model,
-            messages: [
-              {
-                role: 'system',
-                content:
-                  'Bạn là AI chuyên gia phân tích và chấm điểm quảng cáo. Luôn trả về duy nhất 1 object JSON hợp lệ.',
-              },
-              {
-                role: 'user',
-                content: promptText,
-              },
-            ],
-            temperature: 0.2,
-          }),
+    console.log('[evaluateAdWithCriteria] Đang gửi yêu cầu thẩm định tới /api/evaluate-ad...');
+    const response = await fetch('/api/evaluate-ad', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok || !data.success) {
+      const errorMsg = data.error || `Lỗi từ máy chủ thẩm định AI (Mã HTTP: ${response.status})`;
+      console.error('[evaluateAdWithCriteria] AI API trả về lỗi:', errorMsg);
+      return {
+        success: false,
+        error: errorMsg,
+      };
+    }
+
+    // Nếu là chế độ so sánh đối đầu Đa Video
+    if (data.isComparison) {
+      // Chuẩn hóa điểm cho myAdResult
+      if (data.myAdResult) {
+        const scoreInfo = calculateStandardScore(data.myAdResult);
+        data.myAdResult.totalScore = scoreInfo.finalScore;
+        data.myAdResult.score = scoreInfo.finalScore;
+        data.myAdResult.statusLabel = scoreInfo.statusLabel;
+      }
+      // Chuẩn hóa điểm cho từng competitor
+      if (Array.isArray(data.competitorResults)) {
+        data.competitorResults.forEach((cr) => {
+          const scoreInfo = calculateStandardScore(cr);
+          cr.totalScore = scoreInfo.finalScore;
+          cr.score = scoreInfo.finalScore;
+          cr.statusLabel = scoreInfo.statusLabel;
         });
       }
-
-      if (response.ok) {
-        const resJson = await response.json();
-        const rawContent = resJson?.choices?.[0]?.message?.content || '';
-
-        // Bóc tách chuỗi JSON an toàn kể cả khi model bọc trong ```json ... ```
-        const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          if (parsed.groupAResults && parsed.groupBResults) {
-            return parsed;
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('Lỗi gọi API Gwen, chuyển sang bộ chấm điểm nội bộ:', err);
+      return data;
     }
-  }
 
-  // 3. Nếu chưa điền API Key hoặc API lỗi -> Chạy bộ phân tích nội bộ bám sát 18 tiêu chí
-  return analyzeLocallyWithCriteria({ caption, adLink, hasVideo, groupA, groupB });
+    // Kết quả trả về từ chế độ đơn - Chuẩn hóa điểm số
+    const evaluation = data.evaluation;
+    evaluation.isDemo = Boolean(isDemo);
+    const scoreInfo = calculateStandardScore(evaluation);
+    evaluation.totalScore = scoreInfo.finalScore;
+    evaluation.score = scoreInfo.finalScore;
+    evaluation.overallScore = scoreInfo.finalScore;
+    evaluation.baseScore = scoreInfo.baseScore;
+    evaluation.penalty = scoreInfo.penalty;
+    evaluation.criticalCount = scoreInfo.criticalCount;
+    evaluation.statusLabel = scoreInfo.statusLabel;
+    evaluation.status = scoreInfo.statusLabel;
+    return evaluation;
+  } catch (err) {
+    console.error('[evaluateAdWithCriteria] Lỗi kết nối tới máy chủ:', err);
+    return {
+      success: false,
+      error: `Không thể kết nối tới máy chủ backend (/api/evaluate-ad): ${err.message}. Hãy đảm bảo máy chủ Vite dev server đang chạy ('npm run dev').`,
+    };
+  }
 }
 
-function analyzeLocallyWithCriteria({ caption = '', groupA = [], groupB = [] }) {
-  const cleanCaption = caption.trim();
+/**
+ * Sinh dữ liệu mẫu thử nghiệm (Demo) SẠCH SẼ, KHÁCH QUAN khi người dùng CHỦ ĐỘNG chọn chế độ Demo
+ * TUYỆT ĐỐI KHÔNG chứa dữ liệu cứng của "Seoul Center", "Fractional CO2 Laser", "686K",
+ * và KHÔNG nối chuỗi vụng về gây mâu thuẫn logic.
+ */
+export function generateCleanDemoEvaluation({ caption = '', adLink = '', channel, groupA = [], groupB = [] }) {
+  const cleanCaption = (caption || '').trim();
   const lowerCap = cleanCaption.toLowerCase();
 
-  const hasSuperlative =
-    /nhất|số 1|số một|duy nhất|hàng đầu|tuyệt hảo|tốt hơn|gấp \d+ lần/i.test(lowerCap);
-  const hasAbsoluteCommit =
-    /100%|vĩnh viễn|cam kết|đảm bảo hiệu quả|hoàn tiền|sau \d+ ngày|dứt điểm hoàn toàn/i.test(lowerCap);
-  const hasPersonalAttr =
-    /bạn đang bị|da bạn|bạn béo|bạn tự ti|bạn mặc cảm/i.test(lowerCap);
-  const hasMedicalClaim =
-    /đặc trị|chữa khỏi|điều trị tận gốc|corticoid|thuốc trị/i.test(lowerCap);
-  const hasBodyShaming =
-    /xấu thì ế|kém sang|phải đẹp mới được yêu|xấu xí/i.test(lowerCap);
-  const hasLicenseInfo =
-    /giấy phép|phòng khám|địa chỉ|chịu trách nhiệm|không phải là thuốc/i.test(lowerCap);
-  const hasContactOrCTA =
-    /hotline|inbox|đặt lịch|sđt|liên hệ|đăng ký|0\d{8,10}|1800/i.test(lowerCap);
-  const isShortCaption = cleanCaption.length < 60;
+  // Kiểm tra sơ bộ các yếu tố văn bản trong caption thực tế
+  const hasSuperlative = /nhất|số 1|số một|duy nhất|hàng đầu|tuyệt hảo|tốt hơn/i.test(lowerCap);
+  const hasAbsoluteCommit = /100%|vĩnh viễn|cam kết|đảm bảo|hoàn tiền|dứt điểm/i.test(lowerCap);
+  const hasPersonalAttr = /bạn đang bị|da bạn|bạn béo|bạn tự ti|bạn mặc cảm/i.test(lowerCap);
+  const hasMedicalClaim = /đặc trị|chữa khỏi|điều trị tận gốc|corticoid/i.test(lowerCap);
+  const hasLicenseInfo = /giấy phép|phòng khám|địa chỉ|chịu trách nhiệm|không phải là thuốc/i.test(lowerCap);
+  const hasCTA = /hotline|inbox|đặt lịch|sđt|liên hệ|đăng ký/i.test(lowerCap);
 
-  const evaluatedGroupA = groupA.map((item, idx) => {
-    const titleLower = item.title.toLowerCase();
-    if (idx === 0 || titleLower.includes('cam kết')) {
+  const evaluatedGroupA = (groupA || []).map((item, idx) => {
+    const tLower = item.title.toLowerCase();
+    if (idx === 0 || tLower.includes('cam kết')) {
       return hasAbsoluteCommit
-        ? { title: item.title, score: 1, comment: `Caption chứa từ ngữ cam kết tuyệt đối vi phạm hướng dẫn.` }
-        : { title: item.title, score: 3, comment: 'Video không có cam kết tuyệt đối về hiệu quả, nhưng hình ảnh mô phỏng cơ chế tái tạo có thể gây hiểu lầm về mức độ phục hồi.' };
+        ? { title: item.title, score: 2, comment: 'Caption chứa từ ngữ cam kết kết quả chắc chắn hoặc bảo đảm, cần chuyển sang từ ngữ giảm nhẹ.' }
+        : { title: item.title, score: 5, comment: 'Nội dung không dùng từ ngữ cam kết tuyệt đối, phù hợp với quy định về quảng cáo dịch vụ/mỹ phẩm.' };
     }
-    if (idx === 1 || titleLower.includes('thuộc tính cá nhân')) {
+    if (idx === 1 || tLower.includes('thuộc tính cá nhân')) {
       return hasPersonalAttr
-        ? { title: item.title, score: 2, comment: 'Caption trực tiếp chỉ vào tình trạng cá nhân của người xem.' }
-        : { title: item.title, score: 5, comment: 'Quảng cáo tập trung vào giải pháp cho vấn đề sẹo rỗ chung, không nhắm trực tiếp vào thuộc tính cá nhân người xem.' };
+        ? { title: item.title, score: 2, comment: 'Ngữ điệu ngụ ý nhắm trực diện vào khuyết điểm của người xem, có nguy cơ bị Meta gắn cờ Personal Attributes.' }
+        : { title: item.title, score: 4, comment: 'Thông điệp nêu vấn đề chung và giải pháp khách quan, không chỉ trỏ vào người xem.' };
     }
-    if (idx === 2 || titleLower.includes('tuyên bố y tế')) {
+    if (idx === 2 || tLower.includes('tuyên bố y tế')) {
       return hasMedicalClaim
-        ? { title: item.title, score: 1, comment: 'Sử dụng thuật ngữ điều trị y tế như thuốc vi phạm NĐ 342/2025.' }
-        : { title: item.title, score: 4, comment: "Sử dụng thuật ngữ 'tái tạo mô sẹo' và 'Fractional CO2 Laser' phù hợp với dịch vụ thẩm mỹ có phép." };
+        ? { title: item.title, score: 1, comment: 'Có dấu hiệu sử dụng thuật ngữ điều trị như thuốc chữa bệnh, vi phạm NĐ 342/2025.' }
+        : { title: item.title, score: 4, comment: 'Thuật ngữ mô tả công dụng phù hợp với quy chuẩn mỹ phẩm và chăm sóc sắc đẹp.' };
     }
-    if (idx === 3 || titleLower.includes('nhất')) {
+    if (idx === 3 || tLower.includes('nhất')) {
       return hasSuperlative
-        ? { title: item.title, score: 1, comment: `Caption: '${cleanCaption}' vi phạm nghiêm trọng quy định về sử dụng từ chỉ mức độ tuyệt đối ('nhất') không có chứng cứ.` }
-        : { title: item.title, score: 5, comment: "Không sử dụng từ 'nhất' hoặc so sánh trực tiếp với đối thủ." };
+        ? { title: item.title, score: 2, comment: 'Sử dụng từ ngữ chỉ mức độ tuyệt đối ("nhất", "số 1") mà không có tài liệu kiểm chứng hợp pháp theo Điều 8 Luật QC.' }
+        : { title: item.title, score: 5, comment: 'Không sử dụng từ ngữ so sánh tuyệt đối hoặc nhắc tới đối thủ cạnh tranh.' };
     }
-    if (idx === 4 || titleLower.includes('bác sĩ')) {
-      return { title: item.title, score: 4, comment: 'Video có hình ảnh kỹ thuật viên thực hiện dịch vụ, phù hợp cho dịch vụ thẩm mỹ y tế.' };
+    if (idx === 4 || tLower.includes('bác sĩ')) {
+      return { title: item.title, score: 4, comment: 'Không lạm dụng hình ảnh áo blouse hay nhân viên y tế để chứng thực sản phẩm mỹ phẩm/TPCN theo NĐ 342/2025.' };
     }
-    if (idx === 5 || titleLower.includes('thông tin bắt buộc')) {
+    if (idx === 5 || tLower.includes('thông tin bắt buộc')) {
       return !hasLicenseInfo
-        ? { title: item.title, score: 2, comment: 'Thiếu thông tin bắt buộc như số giấy phép hoạt động, phạm vi chuyên môn, địa chỉ cụ thể của cơ sở.' }
-        : { title: item.title, score: 5, comment: 'Đầy đủ thông tin pháp lý bắt buộc theo quy định.' };
+        ? { title: item.title, score: 3, comment: 'Cần bổ sung thêm thông tin đơn vị chịu trách nhiệm đưa sản phẩm ra thị trường hoặc địa chỉ cơ sở.' }
+        : { title: item.title, score: 5, comment: 'Đầy đủ thông tin pháp lý bắt buộc theo quy định hiện hành.' };
     }
-    if (idx === 6 || titleLower.includes('before/after')) {
-      return { title: item.title, score: 3, comment: 'Ảnh before/after có vẻ được chỉnh sửa nhẹ, cần đảm bảo tính chân thực hơn để tránh gây hiểu lầm.' };
+    if (idx === 6 || tLower.includes('before/after')) {
+      return { title: item.title, score: 4, comment: 'Hình ảnh trình bày tự nhiên, không sử dụng hiệu ứng chỉnh sửa quá mức gây hiểu nhầm.' };
     }
-    if (idx === 7 || titleLower.includes('mặc cảm')) {
-      return hasBodyShaming
-        ? { title: item.title, score: 1, comment: 'Nội dung gây mặc cảm ngoại hình.' }
-        : { title: item.title, score: 5, comment: 'Nội dung tích cực, tập trung vào giải pháp cải thiện làn da, không gây mặc cảm về ngoại hình.' };
+    if (idx === 7 || tLower.includes('mặc cảm')) {
+      return { title: item.title, score: 5, comment: 'Thông điệp hướng tới tinh thần tự tin và tích cực, không gây mặc cảm hay lo âu ngoại hình.' };
     }
-    return { title: item.title, score: 4, comment: 'Định dạng video phù hợp nền tảng, ưu đãi rõ ràng nhưng không có deadline cụ thể.' };
+    return { title: item.title, score: 4, comment: 'Định dạng hình ảnh và video rõ nét, dung lượng text trên ảnh ở mức an toàn (<20%).' };
   });
 
-  const evaluatedGroupB = groupB.map((item, idx) => {
-    const titleLower = item.title.toLowerCase();
-    if (idx === 0 || titleLower.includes('hook')) {
-      return hasSuperlative || isShortCaption
-        ? { title: item.title, score: 2, comment: `Video mở đầu bằng việc vạch vùng sẹo, đánh vào nỗi đau nhưng caption '${cleanCaption}' không liên quan trực tiếp.` }
-        : { title: item.title, score: 4, comment: 'Mở đầu thu hút sự chú ý tốt trong 3 giây đầu.' };
+  const evaluatedGroupB = (groupB || []).map((item, idx) => {
+    const tLower = item.title.toLowerCase();
+    if (idx === 0 || tLower.includes('hook')) {
+      return { title: item.title, score: cleanCaption.length > 20 ? 4 : 3, comment: 'Phần mở đầu có yếu tố gợi mở vấn đề, nên tạo điểm nhấn dứt khoát hơn trong 2 dòng đầu.' };
     }
-    if (idx === 1 || titleLower.includes('insight')) {
-      return { title: item.title, score: 4, comment: 'Đánh trúng nỗi đau về sẹo rỗ, mong muốn có làn da mịn màng, nhưng chưa chạm sâu vào tâm lý tự ti hay sự an toàn, uy tín.' };
+    if (idx === 1 || tLower.includes('insight')) {
+      return { title: item.title, score: 4, comment: 'Chạm đúng nhu cầu chăm sóc sắc đẹp và giải quyết vấn đề thực tế của khách hàng mục tiêu.' };
     }
-    if (idx === 2 || titleLower.includes('1 mục tiêu')) {
-      return { title: item.title, score: 4, comment: 'Thông điệp chính rõ ràng là trị sẹo rỗ bằng Fractional CO2 Laser với giá ưu đãi 686K.' };
+    if (idx === 2 || tLower.includes('1 mục tiêu')) {
+      return { title: item.title, score: 4, comment: 'Thông điệp chính tập trung vào một sản phẩm/dịch vụ cốt lõi, không bị phân tán.' };
     }
-    if (idx === 3 || titleLower.includes('văn phong')) {
-      return hasSuperlative || isShortCaption
-        ? { title: item.title, score: 2, comment: `Văn phong video khá chân thực, nhưng caption '${cleanCaption}' lại sáo rỗng, cường điệu và vi phạm chính sách.` }
-        : { title: item.title, score: 5, comment: 'Văn phong tự nhiên, gần gũi, dễ tạo thiện cảm.' };
+    if (idx === 3 || tLower.includes('văn phong')) {
+      return { title: item.title, score: 4, comment: 'Văn phong gần gũi, tự nhiên như lời chia sẻ trải nghiệm.' };
     }
-    if (idx === 4 || titleLower.includes('ugc')) {
-      return { title: item.title, score: 3, comment: 'Video quay cận cảnh quy trình nhưng vẫn mang hơi hướng quảng cáo studio, chưa có cảm giác UGC chân thật.' };
+    if (idx === 4 || tLower.includes('ugc')) {
+      return { title: item.title, score: 3, comment: 'Nên bổ sung thêm các phân đoạn quay thực tế bằng điện thoại hoặc trải nghiệm người dùng để tăng tính chân thật.' };
     }
-    if (idx === 5 || titleLower.includes('bằng chứng xã hội')) {
-      return { title: item.title, score: 2, comment: 'Thiếu các bằng chứng xã hội như review khách hàng thật, số lượng khách, chứng nhận hay giải thưởng cụ thể.' };
+    if (idx === 5 || tLower.includes('bằng chứng xã hội')) {
+      return { title: item.title, score: 3, comment: 'Nên bổ sung phản hồi (feedback) từ khách hàng thực tế hoặc chứng nhận uy tín để củng cố niềm tin.' };
     }
-    if (idx === 6 || titleLower.includes('cta')) {
-      return { title: item.title, score: hasContactOrCTA ? 5 : 4, comment: "Có ưu đãi rõ ràng (686K), CTA 'Nhanh tay liên hệ 1800 3333' rõ ràng, nhưng thiếu địa chỉ cụ thể." };
+    if (idx === 6 || tLower.includes('cta')) {
+      return { title: item.title, score: hasCTA ? 5 : 3, comment: hasCTA ? 'Lời kêu gọi hành động rõ ràng kèm thông tin liên hệ.' : 'Cần bổ sung lời kêu gọi hành động (CTA) dứt khoát ở cuối nội dung.' };
     }
-    if (idx === 7 || titleLower.includes('usp')) {
-      return { title: item.title, score: 3, comment: 'Nêu công nghệ Fractional CO2 Laser nhưng chưa làm nổi bật điểm khác biệt so với các công nghệ khác trên thị trường.' };
+    if (idx === 7 || tLower.includes('usp')) {
+      return { title: item.title, score: 4, comment: 'Có nêu bật lợi ích chính của sản phẩm/dịch vụ, nên làm rõ hơn điểm khác biệt so với thị trường.' };
     }
-    return { title: item.title, score: 4, comment: 'Video chất lượng tốt, hình ảnh sắc nét, có lồng tiếng, hiển thị rõ ở cuối.' };
+    return { title: item.title, score: 4, comment: 'Tỷ lệ khung hình và độ phân giải hình ảnh chuẩn chỉnh, phù hợp với nền tảng.' };
   });
-
-  const sumA = evaluatedGroupA.reduce((acc, cur) => acc + cur.score, 0);
-  const sumB = evaluatedGroupB.reduce((acc, cur) => acc + cur.score, 0);
-  const maxPossible = (evaluatedGroupA.length + evaluatedGroupB.length) * 5 || 90;
-  let totalScore = Math.round(((sumA + sumB) / maxPossible) * 100);
-  if (hasSuperlative && isShortCaption) totalScore = 46;
-
-  const statusLabel = totalScore >= 80 ? 'Tốt' : totalScore >= 65 ? 'Khá' : 'Cần cải thiện';
 
   const warnings = [];
   if (hasSuperlative) {
     warnings.push({
       level: 'Cao',
-      message: 'Sử dụng từ ngữ tuyệt đối, không có căn cứ chứng minh: Trái Điều 8 Luật Quảng cáo 2012/2025 và NĐ 38/2021/NĐ-CP về quảng cáo sai sự thật.',
+      message: 'Nội dung chứa từ ngữ so sánh tuyệt đối ("nhất", "số 1") chưa có tài liệu hợp pháp chứng minh theo Điều 8 Luật Quảng cáo.',
       legalBasisTitle: "Không dùng từ 'nhất' & không so sánh đối thủ",
-      legalCode: '16/2012/QH13 · 38/2021/NĐ-CP',
+      legalCode: 'Điều 8 Luật Quảng cáo 2012 · NĐ 38/2021/NĐ-CP',
     });
   }
-  if (!hasLicenseInfo) {
+  if (hasAbsoluteCommit) {
     warnings.push({
-      level: 'Vừa',
-      message: 'Thiếu thông tin bắt buộc theo quy định pháp luật cho dịch vụ thẩm mỹ y tế: Thiếu số giấy phép hoạt động, phạm vi chuyên môn, địa chỉ cụ thể theo NĐ 96/2023/NĐ-CP.',
-      legalBasisTitle: 'Đủ thông tin bắt buộc theo luật',
-      legalCode: '09/2015/TT-BYT · 96/2023/NĐ-CP',
+      level: 'Cao',
+      message: 'Cam kết hiệu quả chắc chắn (100%, dứt điểm, hoàn tiền) có nguy cơ bị phạt do quảng cáo sai sự thật.',
+      legalBasisTitle: 'Không cam kết kết quả tuyệt đối',
+      legalCode: 'Nghị định 38/2021/NĐ-CP · Luật Bảo vệ người tiêu dùng',
+    });
+  }
+  if (hasMedicalClaim) {
+    warnings.push({
+      level: 'Cao',
+      message: 'Sử dụng từ ngữ điều trị y tế đối với mỹ phẩm/TPCN là hành vi bị nghiêm cấm theo NĐ 342/2025/NĐ-CP.',
+      legalBasisTitle: 'Không tuyên bố y tế / thành phần cấm',
+      legalCode: 'Nghị định 342/2025/NĐ-CP Điều 27-28',
     });
   }
 
+  const scoreInfo = calculateStandardScore({
+    groupAResults: evaluatedGroupA,
+    groupBResults: evaluatedGroupB,
+  });
+  const totalScore = scoreInfo.finalScore;
+  const statusLabel = scoreInfo.statusLabel;
+
   return {
+    isDemo: true,
     totalScore,
     statusLabel,
-    summary:
-      'Video quảng cáo của Seoul Center Clinic giới thiệu dịch vụ tái tạo mô sẹo rỗ bằng công nghệ Fractional CO2 Laser. Quảng cáo trình bày cận cảnh quá trình thực hiện, hình ảnh before/after và đưa ra ưu đãi trải nghiệm 686K (giá gốc 3 triệu), kèm theo lời kêu gọi liên hệ hotline.',
+    summary: cleanCaption
+      ? `Nội dung quảng cáo cho sản phẩm/dịch vụ làm đẹp. Thông điệp tập trung vào giải pháp: "${cleanCaption.slice(0, 100)}${cleanCaption.length > 100 ? '...' : ''}".`
+      : 'Quảng cáo về sản phẩm/dịch vụ chăm sóc sắc đẹp. Nội dung tập trung giới thiệu giải pháp chăm sóc và nâng cao trải nghiệm khách hàng.',
     warnings,
     groupAResults: evaluatedGroupA,
     groupBResults: evaluatedGroupB,
     pros: [
-      'Đánh trúng nỗi đau sẹo rỗ của khách hàng mục tiêu.',
-      'Trình bày rõ ràng công nghệ Fractional CO2 Laser và cơ chế tác động.',
-      'Ưu đãi giá trải nghiệm 686K rất hấp dẫn và có CTA rõ ràng.',
-      'Hình ảnh sản xuất chất lượng, cận cảnh quy trình thực hiện.',
+      'Thông điệp tập trung vào một sản phẩm/dịch vụ chính, dễ tiếp cận người xem.',
+      'Văn phong thân thiện, truyền tải tinh thần tự tin và chăm sóc bản thân tích cực.',
+      'Định dạng hình ảnh và tỷ lệ khung hình chuẩn chỉnh cho chiến dịch quảng cáo số.',
     ],
     cons: [
-      `Caption '${cleanCaption || 'đẳng cấp nhất thế giới'}' vi phạm chính sách nghiêm trọng và sáo rỗng.`,
-      'Thiếu thông tin pháp lý bắt buộc (giấy phép, địa chỉ).',
-      'Thiếu bằng chứng xã hội mạnh mẽ (review, giải thưởng).',
-      'Hình ảnh before/after có thể gây nghi ngờ về độ chân thật.',
-      'Chưa làm rõ số buổi liệu trình hay cam kết hiệu quả cụ thể.',
+      hasSuperlative || hasAbsoluteCommit ? 'Có từ ngữ cam kết hoặc so sánh tuyệt đối cần được làm dịu lại.' : 'Cần bổ sung thêm bằng chứng xã hội (feedback, hình ảnh trải nghiệm thực tế).',
+      'Phần mở đầu (Hook 3 giây đầu) cần tạo điểm nhấn gây tò mò mạnh hơn để giữ chân khách hàng.',
     ],
     customerPerspective:
-      '“Là một phụ nữ 35 tuổi quan tâm làm đẹp, tôi thấy quảng cáo này khá thu hút vì đánh đúng vấn đề sẹo rỗ mà tôi đang gặp phải. Giá 686K cũng rất hấp dẫn. Tuy nhiên, cụm từ "đẳng cấp nhất thế giới" nghe hơi quá và tôi sẽ băn khoăn về độ tin cậy. Tôi cũng muốn biết liệu trình có bao nhiêu buổi, có bác sĩ chuyên môn không và có cam kết gì về hiệu quả không, vì tôi rất sợ rủi ro và cần sự an toàn.”',
+      '“Khi xem quảng cáo này, tôi quan tâm trước hết tới việc liệu giải pháp có thực sự phù hợp với tình trạng của mình và có an toàn không. Những chia sẻ khách quan và minh bạch về thông tin sản phẩm cùng trải nghiệm của những người dùng trước đó sẽ giúp tôi yên tâm hơn rất nhiều trước khi quyết định nhắn tin tư vấn.”',
     competitorAnalysis: {
       overview:
-        'Quảng cáo này thuộc phân khúc dịch vụ trị sẹo rỗ có mức giá trải nghiệm tầm trung (686K), tương đương với phễu của Thẩm Mỹ Quốc Tế (499K) hoặc LG Clinic (369K-449K). Seoul Center đang có lợi thế về giá mồi nhưng cần bổ sung các yếu tố về cam kết và yếu tố y khoa so với các đối thủ.',
+        'Quảng cáo có thông điệp rõ ràng nhưng trên thị trường làm đẹp hiện nay, các đối thủ đang chuyển dịch mạnh mẽ sang hình thức video review thực tế của người dùng (UGC) và minh bạch nguồn gốc sản phẩm.',
       comparisons: [
-        "LG Clinic: Phễu 369K-449K, cam kết '80-90% sẹo rỗ, xóa nhăn, hoàn tiền', show tiến sĩ + máy + KOC hóa đơn thật. Seoul Center thiếu cam kết % và bằng chứng xã hội.",
-        "NGỌC DUNG: Phễu 127K-168K, cam kết 'xóa sẹo sau 7 ngày', show bác sĩ y khoa. Seoul Center chưa có cam kết timeline cụ thể và chưa show bác sĩ rõ ràng.",
-        "BỆNH VIỆN: Phễu giảm 55-75%, cam kết '90% hài lòng' + văn bản, show bác sĩ BV ĐHYD, FDA. Seoul Center thiếu cam kết bằng văn bản và yếu tố y khoa chuyên sâu.",
+        'So với các bên cùng ngành: Các đối thủ hàng đầu thường đầu tư vào chuỗi video ngắn chia sẻ quy trình hoặc trải nghiệm khách hàng thật.',
+        'Về tính pháp lý: Các thương hiệu lớn kiểm soát rất chặt chẽ từ ngữ, hoàn toàn tránh các từ cấm như "đặc trị", "100%" để tài khoản quảng cáo luôn đạt điểm chất lượng cao.',
       ],
       improvements: [
-        "Thêm cam kết hiệu quả bằng số liệu cụ thể (ví dụ 'cải thiện X% sẹo rỗ sau Y buổi').",
-        'Nhấn mạnh yếu tố y khoa, đội ngũ bác sĩ chuyên môn hoặc chứng nhận FDA của thiết bị (kèm giấy phép).',
-        'Bổ sung các bằng chứng xã hội mạnh mẽ như video review khách hàng thật, hóa đơn/kết quả thật.',
-        'Làm rõ số buổi trong liệu trình để tăng perceived value và sự chuyên nghiệp.',
-        'Đưa ra các gói combo hoặc tặng kèm rõ ràng để tăng sức hấp dẫn của ưu đãi.',
+        'Tăng cường nội dung dạng chia sẻ trải nghiệm thực tế (UGC) bằng điện thoại để tăng độ tin cậy tự nhiên.',
+        'Minh bạch thông tin nguồn gốc, số công bố sản phẩm hoặc giấy phép cơ sở ở chân bài quảng cáo.',
       ],
     },
     finalSummary: {
-      text: `Quảng cáo của Seoul Center Clinic có điểm mạnh là đánh trúng nỗi đau sẹo rỗ và đưa ra ưu đãi hấp dẫn, cùng với việc trình bày rõ ràng công nghệ Fractional CO2 Laser. Tuy nhiên, điểm yếu lớn nhất là việc sử dụng cụm từ '${cleanCaption || 'đẳng cấp nhất thế giới'}' trong caption mà không có bằng chứng, điều này vi phạm chính sách quảng cáo nghiêm trọng và làm giảm độ tin cậy. Ngoài ra, quảng cáo còn thiếu các bằng chứng xã hội và thông tin pháp lý bắt buộc.`,
+      text: 'Nội dung có tiềm năng tiếp cận tốt. Để tối ưu chuyển đổi và bảo vệ an toàn cho tài khoản quảng cáo năm 2026, nên tinh chỉnh câu từ mở đầu, tránh hoàn toàn các từ ngữ cam kết tuyệt đối và bổ sung lời kêu gọi hành động rõ ràng.',
       actionItems: [
-        `Loại bỏ cụm từ '${cleanCaption || 'đẳng cấp nhất thế giới'}' khỏi caption để tuân thủ chính sách.`,
-        'Bổ sung số giấy phép hoạt động, phạm vi chuyên môn và địa chỉ cụ thể của cơ sở vào cuối video hoặc trong caption.',
-        'Thêm các bằng chứng xã hội như review khách hàng thật, chứng nhận hoặc giải thưởng (nếu có) để tăng độ tin cậy.',
-        "Làm rõ số buổi trong liệu trình và các cam kết cụ thể về hiệu quả (ví dụ: 'giúp cải thiện sẹo rỗ sau X buổi').",
-        'Đảm bảo hình ảnh before/after chân thực và nếu có bác sĩ thì cần thông tin giấy phép để tăng uy tín y khoa.',
+        'Kiểm tra lại câu chữ ở 2 dòng đầu, không dùng câu hỏi trực diện vào khuyết điểm người xem.',
+        'Bổ sung feedback khách hàng thật và thông tin liên hệ minh bạch.',
+        'Thử nghiệm A/B testing giữa định dạng video chia sẻ trải nghiệm và hình ảnh demo sản phẩm.',
       ],
       variants: [
         {
-          tag: 'Nhấn nỗi đau / insight',
-          content: `Sẹo rỗ lâu năm khiến bạn ngại nhìn thẳng vào gương? 😔 Công nghệ Fractional CO2 Laser tại Seoul Center Clinic hỗ trợ tái tạo mô sẹo, giúp bề mặt da phẳng mịn và đều màu hơn qua từng buổi. Hình ảnh trước/sau trong video được ghi nhận thực tế tại cơ sở. Ưu đãi trải nghiệm công nghệ chỉ 686K (giá gốc 3.000.000đ) — số lượng giới hạn. Inbox để được tư vấn chi tiết liệu trình phù hợp với tình trạng da của bạn nhé!\n#SeoulCenterClinic #TriSeoRo #FractionalCO2Laser\n\n—\nSEOUL CENTER - PHỤNG SỰ TÂM\n📍 Hệ thống chi nhánh: https://seoulcenter.vn/he-thong-chi-nhanh\n📞 Hotline: 1800 3333`,
+          tag: 'Góc nhìn Insight & Storytelling',
+          content: `Hành trình tìm lại làn da rạng rỡ và sự tự tin không hề khó khi chúng ta thấu hiểu đúng nhu cầu của làn da.\n\nChia sẻ cùng chị em giải pháp chăm sóc dịu nhẹ, an toàn được nhiều khách hàng tin tưởng lựa chọn trong thời gian qua.\n\nNhắn tin ngay để nhận tư vấn liệu trình phù hợp và ưu đãi đặc quyền tuần này!`,
         },
         {
-          tag: 'Nhấn ưu đãi / CTA',
-          content: `🔥 ƯU ĐÃI TRẢI NGHIỆM CHỈ 686K (giá gốc 3.000.000đ) - Công nghệ Fractional CO2 Laser tái tạo mô sẹo rỗ tại Seoul Center Clinic!\nQuy trình thực hiện cận cảnh, minh bạch - hiệu quả cải thiện tùy theo cơ địa và liệu trình mỗi người. Số suất ưu đãi có hạn, nhanh tay liên hệ để giữ chỗ trải nghiệm ngay hôm nay!\n#SeoulCenterClinic #UuDaiTriSeoRo #FractionalCO2Laser\n\n—\nSEOUL CENTER - PHỤNG SỰ TỪ TÂM\n📍 Hệ thống chi nhánh: https://seoulcenter.vn/he-thong-chi-nhanh\n📞 Hotline: 1800 3333`,
+          tag: 'Góc nhìn Ưu đãi & Hành động ngay (CTA)',
+          content: `Cơ hội trải nghiệm giải pháp chăm sóc sắc đẹp cao cấp với ưu đãi đặc biệt trong tháng!\n\nƯu đãi giới hạn cho 50 khách hàng đầu tiên đăng ký tư vấn sớm nhất.\n\nĐể lại thông tin hoặc nhắn tin trực tiếp để giữ chỗ ngay hôm nay.`,
         },
         {
-          tag: 'Nhấn cảm xúc / uy tín',
-          content: `Seoul Center Clinic đồng hành cùng hàng nghìn chị em cải thiện sẹo rỗ bằng công nghệ Fractional CO2 Laser, được thực hiện bởi đội ngũ chuyên viên tận tâm. ✨ Hình ảnh before/after trong video là kết quả thực tế từ khách hàng đã trải nghiệm dịch vụ.\nHiện tại, Seoul Center Clinic có ưu đãi trải nghiệm chỉ 686K (giá gốc 3.000.000đ) dành cho khách hàng mới.\n#SeoulCenterClinic #CongNgheLaser #TaiTaoDa\n\n—\nSEOUL CENTER - PHỤNG SỰ TỪ TÂM\n📍 Hệ thống chi nhánh: https://seoulcenter.vn/he-thong-chi-nhanh\n📞 Hotline: 1800 3333`,
+          tag: 'Góc nhìn Trải nghiệm & Bằng chứng thực tế (Social Proof)',
+          content: `Lắng nghe cảm nhận thực tế từ những khách hàng đã trải nghiệm và đồng hành cùng chúng tôi.\n\nSự hài lòng và tin yêu của quý khách chính là thước đo chất lượng lớn nhất.\n\nLiên hệ hotline hoặc ghé trực tiếp cơ sở để được thăm khám và tư vấn chi tiết!`,
         },
       ],
     },
   };
 }
+
+export default {
+  testGwenConnection,
+  evaluateAdWithCriteria,
+  generateCleanDemoEvaluation,
+};

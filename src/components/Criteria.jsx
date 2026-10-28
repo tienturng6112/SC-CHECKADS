@@ -39,11 +39,11 @@ const baseUrlPresets = [
 ];
 
 const modelPresets = [
-  { id: 'qwen-plus', desc: '(Toàn diện & Cân bằng)' },
-  { id: 'qwen-max', desc: '(Thông minh & Sâu sắc)' },
-  { id: 'qwen-turbo', desc: '(Tốc độ cao)' },
-  { id: 'qwen2.5-vl-72b-instruct', desc: '(Đọc ảnh & video)' },
-  { id: 'qwen2.5-72b-instruct', desc: '(Bản 72B cực mạnh)' },
+  { id: 'qwen-vl-max', desc: '(Khuyên dùng: Đọc ảnh & video sâu sắc)' },
+  { id: 'qwen-vl-plus', desc: '(Cân bằng tốc độ & Vision)' },
+  { id: 'qwen2.5-vl-72b-instruct', desc: '(Bản VL 72B cực mạnh)' },
+  { id: 'qwen-max', desc: '(Mô hình suy luận)' },
+  { id: 'qwen-plus', desc: '(Toàn diện)' },
 ];
 
 function CriteriaGroup({
@@ -135,9 +135,20 @@ export default function Criteria({
   const [isTesting, setIsTesting] = useState(false);
   const [gwenSavedMsg, setGwenSavedMsg] = useState(false);
 
-  const handleSaveGwen = () => {
+  const handleSaveGwen = async () => {
     const cleaned = saveGwenConfig(gwenCfg);
     setGwenCfg(cleaned);
+
+    try {
+      await fetch('/api/save-gwen-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...cleaned, selectedAI }),
+      });
+    } catch (err) {
+      console.warn('Không thể ghi trực tiếp file code gwenConfig:', err);
+    }
+
     setGwenSavedMsg(true);
     setTimeout(() => setGwenSavedMsg(false), 2500);
   };

@@ -1,8 +1,8 @@
 // Cấu hình mặc định cho cổng kết nối Gwen (Qwen AI) - OpenAI Compatible
 export const defaultGwenConfig = {
-  baseUrl: 'https://api.xkiro.com/v1',
+  baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
   apiKey: '',
-  model: 'qwen/qwen3.8-omni-flash:free',
+  model: 'qwen-vl-max',
 };
 
 export const GWEN_CONFIG = defaultGwenConfig;
@@ -11,9 +11,19 @@ const STORAGE_KEY = 'cac_gwen_config';
 
 export function getGwenConfig() {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
     if (saved) {
-      return { ...defaultGwenConfig, ...JSON.parse(saved) };
+      const parsed = JSON.parse(saved);
+      let model = parsed.model || defaultGwenConfig.model;
+      // Tự động nâng cấp model text thuần cũ sang model Vision qwen-vl-max
+      if (/^(qwen-plus|qwen-max|qwen-turbo|qwen-long)$/i.test(model.trim())) {
+        model = 'qwen-vl-max';
+      }
+      return {
+        ...defaultGwenConfig,
+        ...parsed,
+        model,
+      };
     }
   } catch (e) {
     console.error('Lỗi đọc cấu hình Gwen:', e);
@@ -26,8 +36,11 @@ export function saveGwenConfig(config) {
     baseUrl: (config.baseUrl || defaultGwenConfig.baseUrl).trim().replace(/\/+$/, ''),
     apiKey: (config.apiKey || '').trim(),
     model: (config.model || defaultGwenConfig.model).trim(),
+    selectedAI: config.selectedAI || 'gwen',
   };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(cleanConfig));
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(cleanConfig));
+  }
   return cleanConfig;
 }
 

@@ -4,6 +4,7 @@ import Header from './components/Header';
 import Dashboard from './components/Dashboard';
 import Evaluate from './components/Evaluate';
 import Criteria from './components/Criteria';
+import History from './components/History';
 import { defaultGroupA, defaultGroupB } from './data/criteriaData';
 
 const tabTitles = {
@@ -77,6 +78,7 @@ export default function App() {
               groupB={groupB}
             />
           )}
+          {activeTab === 'history' && <History onNavigate={handleTabChange} />}
           {activeTab === 'criteria' && (
             <Criteria
               onNavigate={handleTabChange}
@@ -88,13 +90,16 @@ export default function App() {
               setSelectedAI={setSelectedAI}
             />
           )}
-          {activeTab !== 'overview' && activeTab !== 'evaluate' && activeTab !== 'criteria' && (
-            <div className="max-w-6xl mx-auto rounded-2xl bg-[#0d111a] border border-slate-800/80 p-12 text-center">
-              <p className="text-slate-400 text-sm">
-                Giao diện mục <strong className="text-white">{tabTitles[activeTab]}</strong> đang chờ dữ liệu từ anh để clone tiếp...
-              </p>
-            </div>
-          )}
+          {activeTab !== 'overview' &&
+            activeTab !== 'evaluate' &&
+            activeTab !== 'history' &&
+            activeTab !== 'criteria' && (
+              <div className="max-w-6xl mx-auto rounded-2xl bg-[#0d111a] border border-slate-800/80 p-12 text-center">
+                <p className="text-slate-400 text-sm">
+                  Giao diện mục <strong className="text-white">{tabTitles[activeTab]}</strong> đang chờ dữ liệu từ anh để clone tiếp...
+                </p>
+              </div>
+            )}
         </main>
 
         <footer className="h-9 border-t border-slate-800/80 bg-[#07090e] flex items-center justify-center text-[11px] font-mono text-slate-500 shrink-0">
