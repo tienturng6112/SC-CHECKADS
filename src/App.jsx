@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Dashboard from './components/Dashboard';
 import Evaluate from './components/Evaluate';
 import Criteria from './components/Criteria';
+import { defaultGroupA, defaultGroupB } from './data/criteriaData';
 
 const tabTitles = {
   overview: 'Tổng quan',
@@ -21,6 +22,27 @@ export default function App() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isShowingEvalResult, setIsShowingEvalResult] = useState(false);
 
+  // Lưu trữ danh sách tiêu chí Nhóm A & Nhóm B kèm Sub-title ở cấp App để cả Criteria và Evaluate cùng sử dụng
+  const [groupA, setGroupA] = useState(() => {
+    try {
+      const saved = localStorage.getItem('cac_groupA');
+      return saved ? JSON.parse(saved) : defaultGroupA;
+    } catch {
+      return defaultGroupA;
+    }
+  });
+
+  const [groupB, setGroupB] = useState(() => {
+    try {
+      const saved = localStorage.getItem('cac_groupB');
+      return saved ? JSON.parse(saved) : defaultGroupB;
+    } catch {
+      return defaultGroupB;
+    }
+  });
+
+  const [selectedAI, setSelectedAI] = useState('gemini');
+
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     if (tab !== 'evaluate') {
@@ -35,7 +57,6 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-[#07090e] text-slate-100 font-sans overflow-hidden">
-      {/* Sidebar bên trái */}
       <Sidebar
         activeTab={activeTab}
         setActiveTab={handleTabChange}
@@ -43,20 +64,30 @@ export default function App() {
         setIsCollapsed={setIsCollapsed}
       />
 
-      {/* Khu vực nội dung chính bên phải */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Header title={headerTitle} />
 
-        {/* Nội dung cuộn độc lập */}
         <main className="flex-1 overflow-y-auto p-6 md:p-8">
           {activeTab === 'overview' && <Dashboard onNavigate={handleTabChange} />}
           {activeTab === 'evaluate' && (
             <Evaluate
               onNavigate={handleTabChange}
               onResultModeChange={setIsShowingEvalResult}
+              groupA={groupA}
+              groupB={groupB}
             />
           )}
-          {activeTab === 'criteria' && <Criteria onNavigate={handleTabChange} />}
+          {activeTab === 'criteria' && (
+            <Criteria
+              onNavigate={handleTabChange}
+              groupA={groupA}
+              setGroupA={setGroupA}
+              groupB={groupB}
+              setGroupB={setGroupB}
+              selectedAI={selectedAI}
+              setSelectedAI={setSelectedAI}
+            />
+          )}
           {activeTab !== 'overview' && activeTab !== 'evaluate' && activeTab !== 'criteria' && (
             <div className="max-w-6xl mx-auto rounded-2xl bg-[#0d111a] border border-slate-800/80 p-12 text-center">
               <p className="text-slate-400 text-sm">
@@ -66,7 +97,6 @@ export default function App() {
           )}
         </main>
 
-        {/* Thanh Footer cố định ở dưới đáy */}
         <footer className="h-9 border-t border-slate-800/80 bg-[#07090e] flex items-center justify-center text-[11px] font-mono text-slate-500 shrink-0">
           Creative Ads Check · by HiepNguyen
         </footer>

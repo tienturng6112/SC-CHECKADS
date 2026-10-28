@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Sparkles,
   AlertTriangle,
@@ -12,10 +12,10 @@ import {
   Plus,
   Trash2,
   FileText,
-  Loader2,
   X
 } from 'lucide-react';
 import EvaluationResult from './EvaluationResult';
+import { evaluateAdWithCriteria } from '../services/aiEvaluator';
 
 const evaluationModes = [
   {
@@ -50,7 +50,15 @@ const channels = [
   { id: 'google', label: 'Google', dotColor: 'bg-amber-500' },
 ];
 
-// Hàm tự động cắt 6 khung hình từ file Video người dùng tải lên
+const loadingSteps = [
+  'Đang đọc nội dung quảng cáo...',
+  'Đối chiếu chính sách 2026...',
+  'Chấm sức hút & hiệu quả thị trường...',
+  'Soát cảnh báo & rủi ro vi phạm...',
+  'Tổng hợp điểm và gợi ý cải thiện...'
+];
+
+// Hàm cắt 6 khung hình thật từ file Video
 const extractFramesFromVideo = (videoFile, count = 6) => {
   return new Promise((resolve) => {
     const video = document.createElement('video');
@@ -62,18 +70,18 @@ const extractFramesFromVideo = (videoFile, count = 6) => {
     video.onloadedmetadata = async () => {
       const duration = video.duration || 6;
       const canvas = document.createElement('canvas');
-      canvas.width = 320;
-      canvas.height = 240;
+      canvas.width = 360;
+      canvas.height = 270;
       const ctx = canvas.getContext('2d');
       const frames = [];
 
       for (let i = 0; i < count; i++) {
-        const time = Math.min((duration / (count + 1)) * (i + 1), duration - 0.1);
+        const time = Math.min((duration / (count + 1)) * (i + 1), Math.max(duration - 0.1, 0));
         await new Promise((r) => {
           video.currentTime = time;
           video.onseeked = () => {
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            frames.push(canvas.toDataURL('image/jpeg', 0.8));
+            frames.push(canvas.toDataURL('image/jpeg', 0.85));
             r();
           };
         });
@@ -89,14 +97,12 @@ const extractFramesFromVideo = (videoFile, count = 6) => {
   });
 };
 
-// Component Thẻ Upload Quảng Cáo
 function AdUploadCard({
   title,
   type,
   channelInfo,
   onRemove,
   canRemove,
-  isSingleMode,
   file,
   previewUrl,
   onFileSelect,
@@ -119,7 +125,6 @@ function AdUploadCard({
   return (
     <div className="rounded-2xl bg-[#0d111a] border border-slate-800/90 p-6 flex flex-col justify-between space-y-5">
       <div className="space-y-5">
-        {/* Header của Card */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div
@@ -145,9 +150,9 @@ function AdUploadCard({
           )}
         </div>
 
-        {/* Khu vực Kéo - Thả file hoặc Xem trước Video/Ảnh đã tải */}
+        {/* Khu vực hiển thị Video/Ảnh đã chọn hoặc Kéo-thả */}
         {previewUrl ? (
-          <div className="relative rounded-xl bg-[#07090e] border border-indigo-500/50 h-64 overflow-hidden flex items-center justify-center">
+          <div className="relative rounded-xl bg-black border border-slate-800 h-64 overflow-hidden flex items-center justify-center">
             {file?.type?.startsWith('video') ? (
               <video
                 src={previewUrl}
@@ -163,14 +168,11 @@ function AdUploadCard({
             )}
             <button
               onClick={onClearFile}
-              title="Đổi file khác"
-              className="absolute top-3 right-3 p-1.5 rounded-lg bg-slate-900/90 hover:bg-rose-600 text-slate-200 hover:text-white border border-slate-700 transition-colors cursor-pointer"
+              title="Xoá file"
+              className="absolute top-3 right-3 w-7 h-7 rounded-full bg-slate-900/90 hover:bg-rose-600 text-slate-200 hover:text-white border border-slate-700 flex items-center justify-center transition-colors cursor-pointer"
             >
-              <X className="w-4 h-4" />
+              <X className="w-3.5 h-3.5" />
             </button>
-            <div className="absolute bottom-3 left-3 px-2.5 py-1 rounded-md bg-slate-900/85 border border-slate-700 text-[11px] text-slate-300 truncate max-w-[80%]">
-              {file?.name}
-            </div>
           </div>
         ) : (
           <label className="group border border-dashed border-slate-700/80 hover:border-indigo-500/60 rounded-xl bg-[#0a0d14]/60 hover:bg-[#111622] h-64 flex flex-col items-center justify-center p-6 text-center cursor-pointer transition-all">
@@ -209,7 +211,7 @@ function AdUploadCard({
           {errorMsg && <p className="text-xs text-rose-400">{errorMsg}</p>}
         </div>
 
-        {/* Đường kẻ phân cách HOẶC DÁN LINK */}
+        {/* Đường kẻ phân cách */}
         <div className="relative flex items-center py-1">
           <div className="flex-grow border-t border-slate-800/80"></div>
           <span className="flex-shrink mx-3 text-[10px] font-mono uppercase tracking-widest text-slate-500">
@@ -218,7 +220,7 @@ function AdUploadCard({
           <div className="flex-grow border-t border-slate-800/80"></div>
         </div>
 
-        {/* Ô nhập Link quảng cáo */}
+        {/* Ô nhập Link */}
         <div className="relative flex items-center">
           <LinkIcon className="w-3.5 h-3.5 text-slate-500 absolute left-3.5 pointer-events-none" />
           <input
@@ -231,25 +233,24 @@ function AdUploadCard({
         </div>
       </div>
 
-      {/* Footer hiển thị Kênh đang chọn */}
+      {/* Footer hiển thị Kênh */}
       <div className="pt-2 flex items-center gap-2 text-xs text-slate-500">
         <span>Kênh:</span>
         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#161f30] border border-slate-700/60 text-white font-medium text-xs">
           <span className={`w-2 h-2 rounded-full ${channelInfo.dotColor}`} />
           <span>{channelInfo.label}</span>
         </div>
-        {!isSingleMode && <span>· chọn ở trên cho cả 2 bên</span>}
+        <span>· chọn ở trên cho cả 2 bên</span>
       </div>
     </div>
   );
 }
 
-export default function Evaluate({ onNavigate, onResultModeChange }) {
+export default function Evaluate({ onNavigate, onResultModeChange, groupA, groupB }) {
   const [selectedMode, setSelectedMode] = useState('my-ad');
   const [selectedChannel, setSelectedChannel] = useState('facebook');
   const [competitors, setCompetitors] = useState([1]);
 
-  // State cho file upload và caption của "Ad của tôi"
   const [myAdFile, setMyAdFile] = useState(null);
   const [myAdPreview, setMyAdPreview] = useState('');
   const [extractedFrames, setExtractedFrames] = useState([]);
@@ -257,11 +258,20 @@ export default function Evaluate({ onNavigate, onResultModeChange }) {
   const [myAdLink, setMyAdLink] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // State xử lý phân tích AI & hiển thị kết quả
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [showResult, setShowResult] = useState(false);
+  const [loadingStepIdx, setLoadingStepIdx] = useState(0);
+  const [evaluationData, setEvaluationData] = useState(null);
 
   const currentChannelInfo = channels.find((c) => c.id === selectedChannel) || channels[0];
+
+  // Hiệu ứng chuyển đổi câu chữ trong Popup Loading giống trong video
+  useEffect(() => {
+    if (!isAnalyzing) return;
+    const interval = setInterval(() => {
+      setLoadingStepIdx((prev) => (prev + 1) % loadingSteps.length);
+    }, 650);
+    return () => clearInterval(interval);
+  }, [isAnalyzing]);
 
   const handleSelectMyFile = async (file) => {
     setMyAdFile(file);
@@ -282,44 +292,45 @@ export default function Evaluate({ onNavigate, onResultModeChange }) {
     setExtractedFrames([]);
   };
 
-  const handleStartAnalyze = () => {
-    if (!myCaption.trim() && !myAdLink.trim()) {
-      setErrorMsg('Vui lòng nhập Caption quảng cáo hoặc dán link trước khi chấm điểm.');
+  const handleStartAnalyze = async () => {
+    if (!myCaption.trim() && !myAdLink.trim() && !myAdFile) {
+      setErrorMsg('Vui lòng nhập Caption quảng cáo, dán link hoặc chọn file video/ảnh trước khi bấm Chấm điểm.');
       return;
     }
     setErrorMsg('');
+    setLoadingStepIdx(0);
     setIsAnalyzing(true);
 
-    setTimeout(() => {
-      setIsAnalyzing(false);
-      setShowResult(true);
-      if (onResultModeChange) onResultModeChange(true);
-    }, 1200);
+    // Chờ chạy hiệu ứng các bước đọc video & đối chiếu bộ tiêu chí
+    const minDelay = new Promise((r) => setTimeout(r, 3000));
+    const evalPromise = evaluateAdWithCriteria({
+      caption: myCaption,
+      adLink: myAdLink,
+      frames: extractedFrames,
+      hasVideo: Boolean(myAdFile?.type?.startsWith('video')),
+      channel: currentChannelInfo,
+      groupA,
+      groupB
+    });
+
+    const [result] = await Promise.all([evalPromise, minDelay]);
+
+    setEvaluationData(result);
+    setIsAnalyzing(false);
+    if (onResultModeChange) onResultModeChange(true);
   };
 
   const handleReset = () => {
-    setShowResult(false);
+    setEvaluationData(null);
     if (onResultModeChange) onResultModeChange(false);
   };
 
-  const handleAddCompetitor = () => {
-    setCompetitors((prev) => [...prev, prev.length + 1]);
-  };
-
-  const handleRemoveCompetitor = (indexToRemove) => {
-    setCompetitors((prev) => prev.filter((_, idx) => idx !== indexToRemove));
-  };
-
-  // Nếu đã phân tích xong -> Hiển thị giao diện Kết quả
-  if (showResult) {
+  if (evaluationData) {
     return (
       <EvaluationResult
-        data={{
-          channel: currentChannelInfo,
-          frames: extractedFrames,
-          summary:
-            'Quảng cáo giới thiệu dịch vụ cấp ẩm không kim Infusion tại Seoul Center, giúp da mềm mại và mịn màng hơn.'
-        }}
+        result={evaluationData}
+        channel={currentChannelInfo}
+        frames={extractedFrames}
         onReset={handleReset}
         onNavigate={onNavigate}
       />
@@ -327,7 +338,37 @@ export default function Evaluate({ onNavigate, onResultModeChange }) {
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-7 pb-10">
+    <div className="max-w-6xl mx-auto space-y-7 pb-16 relative">
+      {/* POPUP MODAL ĐANG CHẤM ĐIỂM GIỐNG HỆT VIDEO */}
+      {isAnalyzing && (
+        <div className="fixed inset-0 z-50 bg-[#05070b]/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-[#0d111a] border border-slate-800 p-8 text-center space-y-5 shadow-2xl">
+            <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-cyan-400 flex items-center justify-center shadow-[0_0_30px_rgba(99,102,241,0.4)] animate-pulse">
+              <Gauge className="w-8 h-8 text-white" />
+            </div>
+
+            <div className="space-y-1.5">
+              <h3 className="text-base font-bold text-white">Đang chấm điểm</h3>
+              <p className="text-xs text-indigo-300 font-medium h-4 transition-all">
+                {loadingSteps[loadingStepIdx]}
+              </p>
+            </div>
+
+            {/* Thanh tiến trình chạy mượt */}
+            <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 transition-all duration-500 rounded-full"
+                style={{ width: `${((loadingStepIdx + 1) / loadingSteps.length) * 100}%` }}
+              />
+            </div>
+
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              AI đang phân tích — thường mất 10–40 giây tùy nội dung.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Tiêu đề trang */}
       <div className="space-y-1.5">
         <h1 className="text-2xl font-extrabold text-white tracking-tight">Đánh giá quảng cáo</h1>
@@ -336,12 +377,12 @@ export default function Evaluate({ onNavigate, onResultModeChange }) {
         </p>
       </div>
 
-      {/* Khung thông báo AI Gemini */}
+      {/* Khung thông báo AI */}
       <div className="rounded-xl bg-[#111322] border border-indigo-500/25 p-4 space-y-2 text-xs leading-relaxed">
         <div className="flex items-start sm:items-center gap-2 text-slate-200">
           <Sparkles className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5 sm:mt-0" />
           <p>
-            <strong className="font-semibold text-white">Đang chấm bằng Gemini (Google)</strong> — Đọc ảnh và video. Của Google — xem được nguyên video kèm âm thanh.
+            <strong className="font-semibold text-white">Đang chấm bằng AI Động cơ 2026</strong> — Đọc ảnh, video và câu chữ đối chiếu chính sách và chất lượng nội dung.
           </p>
         </div>
 
@@ -353,7 +394,7 @@ export default function Evaluate({ onNavigate, onResultModeChange }) {
         </div>
 
         <div className="pl-6 text-slate-400">
-          Đổi AI ở trang{' '}
+          Đổi AI & cổng kết nối ở trang{' '}
           <button
             onClick={() => onNavigate && onNavigate('criteria')}
             className="text-slate-200 font-semibold underline hover:text-indigo-400 transition-colors cursor-pointer"
@@ -364,8 +405,8 @@ export default function Evaluate({ onNavigate, onResultModeChange }) {
         </div>
       </div>
 
-      {/* Lưới 4 chế độ đánh giá trên cùng 1 hàng */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Lưới chế độ đánh giá */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {evaluationModes.map((mode) => {
           const Icon = mode.icon;
           const isSelected = selectedMode === mode.id;
@@ -435,62 +476,42 @@ export default function Evaluate({ onNavigate, onResultModeChange }) {
 
       {/* 1. Chế độ: Chỉ ad của tôi */}
       {selectedMode === 'my-ad' && (
-        <div className="max-w-2xl space-y-5">
-          <AdUploadCard
-            title="Ad của tôi"
-            type="my-ad"
-            channelInfo={currentChannelInfo}
-            canRemove={false}
-            isSingleMode={true}
-            file={myAdFile}
-            previewUrl={myAdPreview}
-            onFileSelect={handleSelectMyFile}
-            onClearFile={handleClearMyFile}
-            caption={myCaption}
-            setCaption={setMyCaption}
-            adLink={myAdLink}
-            setAdLink={setMyAdLink}
-            errorMsg={errorMsg}
-          />
+        <div className="space-y-6">
+          <div className="max-w-2xl">
+            <AdUploadCard
+              title="Ad của tôi"
+              type="my-ad"
+              channelInfo={currentChannelInfo}
+              canRemove={false}
+              file={myAdFile}
+              previewUrl={myAdPreview}
+              onFileSelect={handleSelectMyFile}
+              onClearFile={handleClearMyFile}
+              caption={myCaption}
+              setCaption={setMyCaption}
+              adLink={myAdLink}
+              setAdLink={setMyAdLink}
+              errorMsg={errorMsg}
+            />
+          </div>
 
-          {/* Nút bấm Phân tích & Chấm điểm AI */}
-          <div className="flex flex-wrap items-center gap-3">
+          {/* Thanh Bar dưới cùng chứa nút Chấm điểm giống hệt trong Video */}
+          <div className="rounded-2xl bg-[#0d111a] border border-slate-800/90 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+              <span>
+                Mỗi ad tốn <strong className="text-slate-200">1 lượt AI</strong> · tổng:{' '}
+                <strong className="text-white">1 lượt</strong>
+              </span>
+            </div>
+
             <button
               onClick={handleStartAnalyze}
               disabled={isAnalyzing}
-              className="flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 text-white font-bold text-sm shadow-lg shadow-indigo-500/20 hover:opacity-95 disabled:opacity-60 transition-all cursor-pointer"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 text-white font-bold text-xs md:text-sm shadow-lg shadow-indigo-500/25 hover:opacity-95 disabled:opacity-50 transition-all cursor-pointer"
             >
-              {isAnalyzing ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>AI đang phân tích video & chấm điểm...</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-4 h-4" />
-                  <span>Chấm điểm quảng cáo</span>
-                </>
-              )}
-            </button>
-
-            <button
-              onClick={() => {
-                if (!myCaption) {
-                  setMyCaption(
-                    'Cấp ẩm không kim Infusion tại Seoul Center — Cứu tinh cho làn da khô ráp, sần sùi! Giúp da căng bóng, mềm mại ngay từ buổi đầu tiên.'
-                  );
-                }
-                setErrorMsg('');
-                setIsAnalyzing(true);
-                setTimeout(() => {
-                  setIsAnalyzing(false);
-                  setShowResult(true);
-                  if (onResultModeChange) onResultModeChange(true);
-                }, 800);
-              }}
-              className="px-4 py-3.5 rounded-xl bg-[#131824] hover:bg-slate-800 text-slate-300 border border-slate-700/80 text-xs font-semibold transition-colors cursor-pointer"
-            >
-              Xem nhanh kết quả mẫu (82/100)
+              <Gauge className="w-4 h-4" />
+              <span>Chấm điểm</span>
             </button>
           </div>
         </div>
@@ -505,7 +526,6 @@ export default function Evaluate({ onNavigate, onResultModeChange }) {
               type="my-ad"
               channelInfo={currentChannelInfo}
               canRemove={false}
-              isSingleMode={false}
               file={myAdFile}
               previewUrl={myAdPreview}
               onFileSelect={handleSelectMyFile}
@@ -524,14 +544,15 @@ export default function Evaluate({ onNavigate, onResultModeChange }) {
                 type="competitor"
                 channelInfo={currentChannelInfo}
                 canRemove={competitors.length > 1}
-                onRemove={() => handleRemoveCompetitor(index)}
-                isSingleMode={false}
+                onRemove={() =>
+                  setCompetitors((prev) => prev.filter((_, idx) => idx !== index))
+                }
               />
             ))}
           </div>
 
           <button
-            onClick={handleAddCompetitor}
+            onClick={() => setCompetitors((prev) => [...prev, prev.length + 1])}
             className="w-full py-3.5 rounded-xl border border-dashed border-slate-800 hover:border-slate-700 bg-[#0d111a]/40 hover:bg-[#0d111a] text-xs font-semibold text-slate-400 hover:text-slate-200 flex items-center justify-center gap-2 transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4" />
@@ -551,19 +572,12 @@ export default function Evaluate({ onNavigate, onResultModeChange }) {
                 type="competitor"
                 channelInfo={currentChannelInfo}
                 canRemove={competitors.length > 1}
-                onRemove={() => handleRemoveCompetitor(index)}
-                isSingleMode={false}
+                onRemove={() =>
+                  setCompetitors((prev) => prev.filter((_, idx) => idx !== index))
+                }
               />
             ))}
           </div>
-
-          <button
-            onClick={handleAddCompetitor}
-            className="w-full py-3.5 rounded-xl border border-dashed border-slate-800 hover:border-slate-700 bg-[#0d111a]/40 hover:bg-[#0d111a] text-xs font-semibold text-slate-400 hover:text-slate-200 flex items-center justify-center gap-2 transition-all cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Thêm ad đối thủ</span>
-          </button>
         </>
       )}
 

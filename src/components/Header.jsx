@@ -1,6 +1,3 @@
-import React from 'react';
-import { Sparkles, Bell } from 'lucide-react';
-
 export default function Header({ title }) {
   return (
     <header className="h-16 px-6 md:px-8 border-b border-slate-800/80 bg-[#0d111a]/60 backdrop-blur-md flex items-center justify-between shrink-0 select-none">

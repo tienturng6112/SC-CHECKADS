@@ -1,119 +1,51 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   Sliders,
   Sparkles,
-  AlertTriangle,
   ShieldCheck,
   Zap,
   Trash2,
   Plus,
   Check,
-  ArrowLeft
+  ArrowLeft,
+  Server,
+  Eye,
+  EyeOff,
+  RefreshCw,
+  Code,
+  Save,
+  FileCode
 } from 'lucide-react';
-
-const initialGroupA = [
-  {
-    id: 'a1',
-    title: 'Không cam kết kết quả tuyệt đối',
-    desc: "✗ Trừ nặng: 'trắng 100%', 'hết nám vĩnh viễn', 'cam kết/đảm bảo hiệu quả', 'hoàn tiền nếu không trắng', mốc thời gian phi thực tế ('trắng sau 3 ngày'). ✓ Vẫn được: 'giúp da sáng mịn hơn', 'nhiều khách cải thiện rõ'. Chỉ tránh sự CHẮC CHẮN tuyệt đối."
-  },
-  {
-    id: 'a2',
-    title: 'Không nhắm thuộc tính cá nhân',
-    desc: "✗ Trừ: ngụ ý BIẾT tình trạng người xem — 'Da bạn đang bị nám?', 'Bạn béo?' (Meta gắn cờ kể cả gián tiếp). ✓ Vẫn được: nêu vấn đề chung hấp dẫn — 'Nám mảng khiến nhiều chị em mất tự tin'. Nói về VẤN ĐỀ, đừng chỉ vào người xem."
-  },
-  {
-    id: 'a3',
-    title: 'Không tuyên bố y tế / thành phần cấm',
-    desc: "Luật VN cấm làm MỸ PHẨM/TPCN bị hiểu là thuốc (NĐ 342/2025 Đ.27-28). ✗ Trừ nặng khi ad MỸ PHẨM/TPCN dùng: 'đặc trị', 'chữa', 'điều trị tận gốc', nói như thuốc; hoặc thành phần cấm (corticoid, tẩy trắng mạnh — TikTok cấm). ✓ Vẫn được (RỦI RO THẤP — đừng trừ nặng): DỊCH VỤ THẨM MỸ/PHÒNG KHÁM có phép."
-  },
-  {
-    id: 'a4',
-    title: "Không dùng từ 'nhất' & không so sánh đối thủ",
-    desc: "Luật Quảng cáo (Đ.8): cấm 'tốt nhất', 'số 1', 'số một', 'duy nhất', 'hàng đầu', 'tuyệt hảo', 'lựa chọn tối ưu'... nếu KHÔNG có tài liệu hợp pháp chứng minh; và cấm so sánh trực tiếp với sản phẩm/dịch vụ của bên khác ('tốt hơn X', 'hiệu quả gấp 5 lần Y'). ✗ Trừ khi ad xưng 'nhất'/danh hiệu/xếp hạng hoặc so sánh mà KHÔNG có chứng cứ."
-  },
-  {
-    id: 'a5',
-    title: 'Không mượn hình ảnh bác sĩ / nhân viên y tế (mỹ phẩm & TPCN)',
-    desc: "NĐ 342/2025 (hiệu lực 15/2/2026) CẤM dùng hình ảnh, trang phục áo blouse, tên, thư, lời nói/chứng thực của bác sĩ, dược sĩ, nhân viên & cơ sở y tế để QC MỸ PHẨM và TPCN. ✗ Trừ nặng nếu ad mỹ phẩm/TPCN show bác sĩ/áo trắng/'chuyên gia da liễu khuyên dùng'. ✓ NGOẠI LỆ: dịch vụ thẩm mỹ Y TẾ có giấy phép."
-  },
-  {
-    id: 'a6',
-    title: 'Đủ thông tin bắt buộc theo luật',
-    desc: "Nội dung QC phải có thông tin luật định. ✗ Trừ khi THIẾU: (mỹ phẩm — NĐ 342/2025 Đ.27-28) tên sản phẩm + công dụng + tên & địa chỉ tổ chức chịu trách nhiệm đưa ra thị trường; (TPCN — NĐ 15/2018) khuyến cáo 'Thực phẩm này không phải là thuốc và không có tác dụng thay thế thuốc chữa bệnh' hiển thị rõ; (dịch vụ thẩm mỹ) thông tin cơ sở."
-  },
-  {
-    id: 'a7',
-    title: 'Hình ảnh & before/after trung thực',
-    desc: "✗ Trừ: ảnh trước/sau hoặc ghép kết quả 'hoàn hảo' ngụ ý biến đổi phi thực tế, chỉnh sửa/filter quá tay (Meta & Google siết; TikTok cấm filter làm đẹp trong ad skincare). ✓ Vẫn được: ảnh sản phẩm/khách thật đẹp, demo cách dùng, kết cấu sản phẩm."
-  },
-  {
-    id: 'a8',
-    title: 'Không hạ thấp / gây mặc cảm ngoại hình',
-    desc: "✗ Trừ: 'xấu thì ế', 'da sần là kém sang', 'phải đẹp mới được yêu' (TikTok siết nội dung gây lo âu hình thể). ✓ Vẫn được — và NÊN: truyền cảm hứng tự tin, tích cực, tôn vẻ đẹp tự nhiên."
-  },
-  {
-    id: 'a9',
-    title: 'Chuẩn định dạng & ưu đãi minh bạch',
-    desc: "✗ Trừ: chữ trên ảnh > 20% diện tích (quy định Facebook), khan hiếm GIẢ/clickbait lừa, ưu đãi/giá không đúng chương trình thật (QC sai sự thật bị phạt theo NĐ 38/2021). ✓ Vẫn được: ưu đãi/giảm giá/deadline CÓ THẬT, đúng chương trình đã duyệt. (Thông tin luật định bắt buộc chấm ở tiêu chí 'Đủ thông tin bắt buộc theo luật')."
-  }
-];
-
-const initialGroupB = [
-  {
-    id: 'b1',
-    title: 'Tiêu đề / hook mở đầu mạnh',
-    desc: "Tiêu đề là 'vũ khí tối thượng' (góp ~80% hiệu quả). 2-3 DÒNG ĐẦU (phần trước 'Xem thêm' bị Facebook cắt) phải níu mắt ngay, bám điểm nổi bật/insight/ưu đãi. Video: 3 giây đầu phải dừng được lướt. Mở đầu nhạt, chậm → trừ."
-  },
-  {
-    id: 'b2',
-    title: 'Đánh trúng insight & nỗi đau khách hàng',
-    desc: "Chạm đúng vấn đề thật (nám, mụn, lão hoá, da xỉn) và mong muốn ẩn (tự tin, trẻ trung). Liên tục bám vấn đề khách quan tâm, không lan man. Nói bằng ngôn ngữ của khách, không sáo rỗng."
-  },
-  {
-    id: 'b3',
-    title: 'Tập trung 1 mục tiêu / 1 thông điệp',
-    desc: "Nhắm 1 và chỉ 1: một mục tiêu, một thông điệp chính, một insight. Đơn giản và tập trung; trong vài giây hiểu đang bán gì và lợi ích cốt lõi. Ôm đồm nhiều ý làm loãng → trừ."
-  },
-  {
-    id: 'b4',
-    title: 'Văn phong tự nhiên, gần gũi, chạm cảm xúc',
-    desc: "Viết tự nhiên NHƯ NÓI, có cảm xúc, tạo hình ảnh trong đầu người đọc (dễ liên tưởng). Khách mua nhiều bằng cảm xúc — chạm tới điều đó. Tránh giọng quảng cáo cứng, 'nổ', sáo. Văn trôi chảy, có nhịp, thỉnh thoảng có điểm nhấn gây chú ý."
-  },
-  {
-    id: 'b5',
-    title: 'Cảm giác chân thật / UGC',
-    desc: "Đặc điểm ad làm đẹp thắng 2026: bớt bóng bẩy, tăng tự nhiên như người thật chia sẻ (UGC, review thật, quay điện thoại, kể trải nghiệm, hậu trường). Quá 'studio'/cường điệu, giả tạo → trừ. Chân thật tạo niềm tin & chuyển đổi cao hơn."
-  },
-  {
-    id: 'b6',
-    title: 'Bằng chứng xã hội & độ tin cậy',
-    desc: "Có yếu tố tin cậy THẬT: review/cảm nhận khách thật, số lượng khách/đánh giá, KOL/micro-influencer, chứng nhận, giấy phép cơ sở. Không có bằng chứng nào → trừ; review giả/cường điệu cũng không cộng. LƯU Ý PHÁP LÝ: với ad MỸ PHẨM/TPCN, không được lấy hình ảnh/lời bác sĩ, dược sĩ làm bằng chứng (NĐ 342/2025)."
-  },
-  {
-    id: 'b7',
-    title: 'Ưu đãi, CTA & thông tin liên hệ',
-    desc: "Có lý do hành động NGAY: ưu đãi/quà/giá tốt + lời kêu gọi rõ (inbox, đặt lịch, để lại SĐT). Có chân bài/thông tin liên hệ (địa chỉ, hotline, website, danh hiệu) ở cuối. CTA rõ nhưng không 'nổ' lố. Thiếu CTA hoặc thiếu cách liên hệ → trừ."
-  },
-  {
-    id: 'b8',
-    title: 'Điểm khác biệt (USP)',
-    desc: "Nêu được lý do chọn mình thay vì đối thủ: công nghệ, thành phần đặc trưng, quy trình, cam kết dịch vụ, định vị riêng. 'Sản phẩm tốt' chung chung ai cũng nói được → trừ."
-  },
-  {
-    id: 'b9',
-    title: 'Chuẩn sản xuất & hợp format nền tảng',
-    desc: "Ảnh/video chất lượng, logo/thương hiệu rõ nét. Đúng tỉ lệ nền tảng: Facebook/TikTok 1:1 hoặc 9:16, YouTube 16:9 (1920×1080). Video nên 15-90s, có sub, có outro cuối, voice rõ không tạp âm. Hợp 'gu'/xu hướng nền tảng (TikTok/Reels native). Sai chuẩn/lạc format → trừ."
-  }
-];
+import {
+  getGwenConfig,
+  saveGwenConfig,
+  generateConfigFileCode
+} from '../config/gwenConfig';
+import { testGwenConnection } from '../services/aiEvaluator';
 
 const aiModels = [
-  { id: 'claude', label: 'Claude (Anthropic)' },
-  { id: 'chatgpt', label: 'ChatGPT (OpenAI)' },
-  { id: 'gemini', label: 'Gemini (Google)' },
+  { id: 'gwen', label: 'Gwen (Qwen AI)', sub: 'Cổng kết nối tự do' },
+  { id: 'gemini', label: 'Gemini (Google)', sub: '' },
+  { id: 'chatgpt', label: 'ChatGPT (OpenAI)', sub: '' },
+  { id: 'claude', label: 'Claude (Anthropic)', sub: '' },
 ];
 
-// Component hiển thị 1 Nhóm tiêu chí (Nhóm A hoặc Nhóm B)
+const baseUrlPresets = [
+  { label: 'DashScope Global (Chuẩn)', url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1' },
+  { label: 'DashScope China', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+  { label: 'OpenRouter', url: 'https://openrouter.ai/api/v1' },
+  { label: 'Together AI', url: 'https://api.together.xyz/v1' },
+  { label: 'Ollama Local', url: 'http://localhost:11434/v1' },
+];
+
+const modelPresets = [
+  { id: 'qwen-plus', desc: '(Toàn diện & Cân bằng)' },
+  { id: 'qwen-max', desc: '(Thông minh & Sâu sắc)' },
+  { id: 'qwen-turbo', desc: '(Tốc độ cao)' },
+  { id: 'qwen2.5-vl-72b-instruct', desc: '(Đọc ảnh & video)' },
+  { id: 'qwen2.5-72b-instruct', desc: '(Bản 72B cực mạnh)' },
+];
+
 function CriteriaGroup({
   title,
   icon: Icon,
@@ -125,7 +57,6 @@ function CriteriaGroup({
 }) {
   return (
     <div className="rounded-2xl bg-[#0d111a] border border-slate-800/90 overflow-hidden">
-      {/* Header của Nhóm */}
       <div className="px-6 py-5 border-b border-slate-800/80 flex items-center justify-between">
         <div className="flex items-center gap-3.5">
           <div className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 ${iconBoxStyle}`}>
@@ -133,14 +64,12 @@ function CriteriaGroup({
           </div>
           <h2 className="text-sm md:text-base font-bold text-white">{title}</h2>
         </div>
-        <span className="text-xs font-mono text-slate-400">{items.length} tiêu chí</span>
+        <span className="text-xs font-mono text-slate-400">{items?.length || 0} tiêu chí</span>
       </div>
 
-      {/* Danh sách các tiêu chí */}
       <div className="divide-y divide-slate-800/70">
-        {items.map((item, index) => (
+        {(items || []).map((item, index) => (
           <div key={item.id} className="p-6 space-y-3">
-            {/* Dòng 1: Số thứ tự + Input Tiêu đề + Nút Xóa */}
             <div className="flex items-center gap-3">
               <span className="w-6 text-xs font-mono text-slate-500 select-none shrink-0">
                 {index + 1}.
@@ -161,13 +90,12 @@ function CriteriaGroup({
               </button>
             </div>
 
-            {/* Dòng 2: Textarea Hướng dẫn chấm điểm */}
             <div className="pl-9">
               <textarea
-                rows={2}
+                rows={3}
                 value={item.desc}
                 onChange={(e) => onUpdateItem(item.id, 'desc', e.target.value)}
-                placeholder="Nhập hướng dẫn chi tiết để AI dựa vào chấm điểm..."
+                placeholder="Nhập hướng dẫn chi tiết (sub-title) để AI dựa vào chấm điểm..."
                 className="w-full rounded-xl bg-[#07090e] border border-slate-800/90 focus:border-indigo-500/60 px-4 py-3 text-xs text-slate-200 leading-relaxed placeholder-slate-600 focus:outline-none resize-y transition-colors"
               />
             </div>
@@ -175,7 +103,6 @@ function CriteriaGroup({
         ))}
       </div>
 
-      {/* Footer của Nhóm: Nút Thêm tiêu chí */}
       <div className="px-6 py-4 border-t border-slate-800/80 bg-[#0b0e17]">
         <button
           onClick={onAddItem}
@@ -189,13 +116,41 @@ function CriteriaGroup({
   );
 }
 
-export default function Criteria({ onNavigate }) {
-  const [selectedAI, setSelectedAI] = useState('gemini');
-  const [groupA, setGroupA] = useState(initialGroupA);
-  const [groupB, setGroupB] = useState(initialGroupB);
+export default function Criteria({
+  onNavigate,
+  groupA,
+  setGroupA,
+  groupB,
+  setGroupB,
+  selectedAI = 'gwen',
+  setSelectedAI
+}) {
   const [savedNotice, setSavedNotice] = useState(false);
 
-  // Các hàm cập nhật Nhóm A
+  // State cho Cổng kết nối Gwen (Qwen AI)
+  const [gwenCfg, setGwenCfg] = useState(() => getGwenConfig());
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [showCodePreview, setShowCodePreview] = useState(false);
+  const [testStatus, setTestStatus] = useState(null);
+  const [isTesting, setIsTesting] = useState(false);
+  const [gwenSavedMsg, setGwenSavedMsg] = useState(false);
+
+  const handleSaveGwen = () => {
+    const cleaned = saveGwenConfig(gwenCfg);
+    setGwenCfg(cleaned);
+    setGwenSavedMsg(true);
+    setTimeout(() => setGwenSavedMsg(false), 2500);
+  };
+
+  const handleTestConnection = async () => {
+    setIsTesting(true);
+    setTestStatus(null);
+    saveGwenConfig(gwenCfg);
+    const res = await testGwenConnection(gwenCfg);
+    setTestStatus(res);
+    setIsTesting(false);
+  };
+
   const updateGroupA = (id, field, value) => {
     setGroupA((prev) => prev.map((item) => (item.id === id ? { ...item, [field]: value } : item)));
   };
@@ -209,7 +164,6 @@ export default function Criteria({ onNavigate }) {
     ]);
   };
 
-  // Các hàm cập nhật Nhóm B
   const updateGroupB = (id, field, value) => {
     setGroupB((prev) => prev.map((item) => (item.id === id ? { ...item, [field]: value } : item)));
   };
@@ -224,6 +178,9 @@ export default function Criteria({ onNavigate }) {
   };
 
   const handleSave = () => {
+    localStorage.setItem('cac_groupA', JSON.stringify(groupA));
+    localStorage.setItem('cac_groupB', JSON.stringify(groupB));
+    saveGwenConfig(gwenCfg);
     setSavedNotice(true);
     setTimeout(() => setSavedNotice(false), 2500);
   };
@@ -243,50 +200,217 @@ export default function Criteria({ onNavigate }) {
         </div>
       </div>
 
-      {/* Khối chọn AI dùng để chấm điểm */}
+      {/* Khối chọn AI dùng để chấm điểm (4 nút: Gwen, Gemini, ChatGPT, Claude) */}
       <div className="rounded-2xl bg-[#0d111a] border border-slate-800/90 p-6 space-y-4">
         <div className="flex items-center gap-2 text-xs md:text-sm font-bold text-white">
           <Sparkles className="w-4 h-4 text-indigo-400" />
           <span>AI dùng để chấm điểm</span>
         </div>
 
-        {/* 3 Nút chọn AI */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {aiModels.map((model) => {
-            const isSelected = selectedAI === model.id;
+            const isSelected = (selectedAI || 'gwen') === model.id;
             return (
               <button
                 key={model.id}
-                onClick={() => setSelectedAI(model.id)}
-                className={`py-3 px-4 rounded-xl text-xs md:text-sm font-bold transition-all cursor-pointer ${
+                onClick={() => setSelectedAI && setSelectedAI(model.id)}
+                className={`py-3 px-4 rounded-xl text-left transition-all cursor-pointer flex flex-col justify-center ${
                   isSelected
                     ? 'bg-[#15192c] border-2 border-indigo-500 text-white shadow-[0_0_20px_rgba(99,102,241,0.18)]'
                     : 'bg-[#121622] border border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                 }`}
               >
-                {model.label}
+                <div className="flex items-center justify-between w-full">
+                  <span className="text-xs md:text-sm font-bold">{model.label}</span>
+                  {isSelected && <Check className="w-3.5 h-3.5 text-indigo-400 shrink-0" />}
+                </div>
+                {model.sub && (
+                  <span className="text-[11px] text-cyan-400 font-medium mt-0.5">
+                    {model.sub}
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
+      </div>
 
-        {/* Hộp mô tả chi tiết AI */}
-        <div className="rounded-xl bg-[#0a0d15] border border-slate-800/90 p-4 space-y-2 text-xs leading-relaxed">
-          <div className="flex items-start sm:items-center gap-2 text-slate-300">
-            <Sparkles className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5 sm:mt-0" />
-            <p>Đọc ảnh và video. Của Google — xem được nguyên video kèm âm thanh.</p>
+      {/* KHỐI CỔNG KẾT NỐI VỚI GWEN (QWEN AI) */}
+      <div className="rounded-2xl bg-[#0d111a] border border-indigo-500/30 p-6 space-y-6 shadow-[0_0_30px_rgba(99,102,241,0.06)]">
+        {/* Header Cổng kết nối */}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800/80 pb-5">
+          <div className="flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 flex items-center justify-center shrink-0">
+              <Server className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2.5">
+                <h2 className="text-sm md:text-base font-bold text-white">
+                  Cổng kết nối với Gwen (Qwen AI)
+                </h2>
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-semibold">
+                  OpenAI Compatible
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Nhập Base URL, API Key, Model — Sau khi bấm Lưu sẽ lưu trực tiếp trong code
+              </p>
+            </div>
           </div>
-          <div className="flex items-start sm:items-center gap-2 text-amber-400">
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5 sm:mt-0" />
-            <p>
-              Video: xem NGUYÊN clip và NGHE lời thoại/nhạc để chấm sâu (hook, lời thoại, diễn biến). Cần tài khoản còn credit.
-            </p>
+
+          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#090d16] border border-slate-800 text-cyan-400 text-xs font-mono">
+            <FileCode className="w-3.5 h-3.5" />
+            <span>src/config/gwenConfig.js</span>
           </div>
         </div>
 
-        <p className="text-[11px] text-slate-500">
-          Cần API key tương ứng trong .env.local. Bấm “Lưu” để áp dụng.
-        </p>
+        {/* 1. Base URL */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <label className="font-bold text-slate-200">
+              Base URL (Cổng kết nối máy chủ) <span className="text-rose-400">*</span>
+            </label>
+            <span className="text-[11px] font-mono text-slate-500">
+              Chuẩn OpenAI / compatible-mode
+            </span>
+          </div>
+          <input
+            type="text"
+            value={gwenCfg.baseUrl}
+            onChange={(e) => setGwenCfg({ ...gwenCfg, baseUrl: e.target.value })}
+            placeholder="https://api.xkiro.com/v1"
+            className="w-full rounded-xl bg-[#07090e] border border-slate-800/90 focus:border-indigo-500/60 px-4 py-3 text-xs md:text-sm font-mono text-white placeholder-slate-600 focus:outline-none transition-colors"
+          />
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            <span className="text-[11px] text-slate-500 mr-1">Gợi ý nhanh:</span>
+            {baseUrlPresets.map((preset, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => setGwenCfg({ ...gwenCfg, baseUrl: preset.url })}
+                className="px-2.5 py-1 rounded-lg bg-[#121724] hover:bg-slate-800 border border-slate-800 text-[11px] text-slate-300 transition-colors cursor-pointer"
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 2. API Key */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <label className="font-bold text-slate-200">
+              API Key <span className="text-slate-400 font-normal">(Khóa xác thực bí mật)</span>
+            </label>
+            <span className="text-[11px] text-slate-500">
+              Lưu trực tiếp vào file code & bộ nhớ
+            </span>
+          </div>
+          <div className="relative flex items-center">
+            <input
+              type={showApiKey ? 'text' : 'password'}
+              value={gwenCfg.apiKey}
+              onChange={(e) => setGwenCfg({ ...gwenCfg, apiKey: e.target.value })}
+              placeholder="sk-........................................................"
+              className="w-full rounded-xl bg-[#07090e] border border-slate-800/90 focus:border-indigo-500/60 pl-4 pr-10 py-3 text-xs md:text-sm font-mono text-white placeholder-slate-600 focus:outline-none transition-colors"
+            />
+            <button
+              type="button"
+              onClick={() => setShowApiKey(!showApiKey)}
+              className="absolute right-3 text-slate-500 hover:text-slate-300 cursor-pointer"
+            >
+              {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            API key của bạn sẽ được lưu trực tiếp vào code{' '}
+            <span className="text-cyan-400 font-mono">src/config/gwenConfig.js</span> khi bấm Lưu.
+          </p>
+        </div>
+
+        {/* 3. Model */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <label className="font-bold text-slate-200">
+              Model (Tên mô hình Gwen / Qwen) <span className="text-rose-400">*</span>
+            </label>
+            <span className="text-[11px] font-mono text-slate-500">vd: qwen-plus, qwen-max</span>
+          </div>
+          <input
+            type="text"
+            value={gwenCfg.model}
+            onChange={(e) => setGwenCfg({ ...gwenCfg, model: e.target.value })}
+            placeholder="qwen/qwen3.8-omni-flash:free"
+            className="w-full rounded-xl bg-[#07090e] border border-slate-800/90 focus:border-indigo-500/60 px-4 py-3 text-xs md:text-sm font-mono text-white placeholder-slate-600 focus:outline-none transition-colors"
+          />
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            <span className="text-[11px] text-slate-500 mr-1">Mô hình phổ biến:</span>
+            {modelPresets.map((m, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => setGwenCfg({ ...gwenCfg, model: m.id })}
+                className="px-2.5 py-1 rounded-lg bg-[#121724] hover:bg-slate-800 border border-slate-800 text-[11px] text-slate-300 transition-colors cursor-pointer"
+              >
+                <strong className="text-white font-mono">{m.id}</strong>{' '}
+                <span className="text-slate-500">{m.desc}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Thông báo kết quả Kiểm tra kết nối */}
+        {testStatus && (
+          <div
+            className={`rounded-xl p-3.5 text-xs border ${
+              testStatus.ok
+                ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-300'
+                : 'bg-rose-950/30 border-rose-500/30 text-rose-300'
+            }`}
+          >
+            {testStatus.message}
+          </div>
+        )}
+
+        {/* Xem trước file code gwenConfig.js */}
+        {showCodePreview && (
+          <pre className="rounded-xl bg-[#07090e] border border-slate-800 p-4 text-xs font-mono text-cyan-300 overflow-x-auto">
+            {generateConfigFileCode(gwenCfg)}
+          </pre>
+        )}
+
+        {/* Footer 3 nút bấm */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800/80">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleTestConnection}
+              disabled={isTesting}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#121724] hover:bg-slate-800 border border-slate-700/80 text-xs font-semibold text-slate-200 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${isTesting ? 'animate-spin' : ''}`} />
+              <span>{isTesting ? 'Đang kiểm tra...' : 'Kiểm tra kết nối'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowCodePreview(!showCodePreview)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#121724] hover:bg-slate-800 border border-slate-700/80 text-xs font-semibold text-slate-200 transition-colors cursor-pointer"
+            >
+              <Code className="w-3.5 h-3.5 text-slate-400" />
+              <span>{showCodePreview ? 'Ẩn xem code' : 'Xem file code'}</span>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSaveGwen}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 text-white font-bold text-xs md:text-sm shadow-lg shadow-indigo-500/20 hover:opacity-95 transition-opacity cursor-pointer"
+          >
+            <Save className="w-4 h-4" />
+            <span>{gwenSavedMsg ? 'Đã lưu cấu hình Gwen!' : 'Lưu cấu hình Gwen vào code'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Nhóm A — Tuân thủ chính sách */}
@@ -311,14 +435,14 @@ export default function Criteria({ onNavigate }) {
         onAddItem={addGroupB}
       />
 
-      {/* Cụm nút Lưu & Về trang chủ ở cuối trang */}
+      {/* Cụm nút Lưu ở đáy trang */}
       <div className="flex flex-wrap items-center gap-3.5 pt-2">
         <button
           onClick={handleSave}
           className="flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-500 via-purple-500 to-cyan-400 text-white font-bold text-xs md:text-sm shadow-lg shadow-indigo-500/20 hover:opacity-95 transition-opacity cursor-pointer"
         >
           <Check className="w-4 h-4" />
-          <span>{savedNotice ? 'Đã lưu thành công!' : 'Lưu bộ tiêu chí'}</span>
+          <span>{savedNotice ? 'Đã lưu bộ tiêu chí!' : 'Lưu bộ tiêu chí'}</span>
         </button>
 
         <button
